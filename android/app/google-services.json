@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1091271496660",
+    "project_id": "magzmotron-5ae93",
+    "storage_bucket": "magzmotron-5ae93.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1091271496660:android:b2ac0e04a4735ffdb53c41",
+        "android_client_info": {
+          "package_name": "com.example.magzmotron"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD0pYM5_xXEaYhtRqzi4vpPAGhNDVEBKYA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
