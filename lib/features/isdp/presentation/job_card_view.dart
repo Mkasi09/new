@@ -23,7 +23,7 @@ class _JobCardViewState extends State<JobCardView> {
       children: [
         WorkOrderCard(order: widget.order, onTap: () {}),
         const SizedBox(height: 14),
-        const SectionTitle('Onsite Job Card'),
+        const SectionTitle('Field Job Card'),
         const SizedBox(height: 10),
         ...List.generate(widget.jobSteps.length, (index) {
           final step = widget.jobSteps[index];

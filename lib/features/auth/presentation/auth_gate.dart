@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/widgets/splash_screen.dart';
+import '../../isdp/data/firebase_isdp_repository.dart';
 import '../../isdp/presentation/isdp_shell.dart';
 import '../domain/auth_repository.dart';
 import 'login_screen.dart';
@@ -33,6 +34,7 @@ class AuthGate extends StatelessWidget {
             return IsdpShell(
               initialRole: roleSnapshot.data,
               authRepository: authRepository,
+              isdpRepository: FirebaseIsdpRepository(),
             );
           },
         );

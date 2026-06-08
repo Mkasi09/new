@@ -15,7 +15,7 @@ class AppScrollView extends StatelessWidget {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 980),
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
             children: children,
           ),
         ),
@@ -156,13 +156,27 @@ class WorkOrderCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(order.id, style: const TextStyle(color: AppTheme.muted)),
+                const SizedBox(height: 4),
+                Text(
+                  order.address,
+                  style: const TextStyle(color: AppTheme.muted),
+                ),
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
                   children: [
                     InfoChip(icon: Icons.schedule, label: order.sla),
-                    InfoChip(icon: Icons.qr_code, label: order.siteCode),
+                    if (order.supervisor != null)
+                      InfoChip(
+                        icon: Icons.supervisor_account_outlined,
+                        label: order.supervisor!,
+                      ),
+                    if (order.assignedTo != null)
+                      InfoChip(
+                        icon: Icons.person_outline,
+                        label: order.assignedTo!,
+                      ),
                   ],
                 ),
               ],
@@ -176,8 +190,18 @@ class WorkOrderCard extends StatelessWidget {
 
 Color workOrderStatusColor(String status) {
   switch (status) {
+    case 'Assigned to Supervisor':
+    case 'New':
+      return AppTheme.warning;
+    case 'Accepted by Supervisor':
+    case 'Accepted':
+      return AppTheme.secondary;
+    case 'Submitted':
     case 'Complete':
       return AppTheme.success;
+    case 'Approved':
+      return AppTheme.success;
+    case 'On Site':
     case 'Onsite':
       return AppTheme.secondary;
     case 'Dispatched':

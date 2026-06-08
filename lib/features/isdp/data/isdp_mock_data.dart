@@ -3,95 +3,65 @@ import 'package:flutter/material.dart';
 import '../../../app/theme/app_theme.dart';
 import '../domain/entities.dart';
 
-const workOrders = [
-  WorkOrder(
-    id: 'WO-CMT-ESW-1048',
-    site: 'Matsapha Industrial Site 03',
-    scope: 'Replace RRU and align sector antenna',
-    sla: '11h left',
-    siteCode: 'SITE-MAT-03',
-    status: 'Onsite',
-    priority: Priority.critical,
-  ),
-  WorkOrder(
-    id: 'WO-CMT-ESW-1049',
-    site: 'Mbabane Hilltop BTS',
-    scope: 'Power alarm fault isolation and battery check',
-    sla: '22h left',
-    siteCode: 'SITE-MBB-HT',
-    status: 'Dispatched',
-    priority: Priority.high,
-  ),
-  WorkOrder(
-    id: 'WO-CMT-ESW-1050',
-    site: 'Manzini Central Rooftop',
-    scope: 'Upload KPIs and as-built photo pack',
-    sla: 'Accepted',
-    siteCode: 'SITE-MNZ-CR',
-    status: 'Complete',
-    priority: Priority.low,
-  ),
-];
-
 const dashboardMetrics = [
-  Metric('Open WOs', '18', Icons.assignment_late, AppTheme.primary),
-  Metric('High SLA', '5', Icons.timer, AppTheme.warning),
+  Metric('Open Jobs', '18', Icons.assignment_late, AppTheme.primary),
+  Metric('Due Soon', '5', Icons.timer, AppTheme.warning),
   Metric('Accepted', '42', Icons.verified, AppTheme.success),
   Metric('Blocked Pay', '3', Icons.payments_outlined, AppTheme.danger),
 ];
 
 const jobSteps = [
   JobStep(
-    'Accept dispatch',
-    Icons.outbound,
-    'ETA submitted to the operations dispatcher.',
+    'Review job details',
+    Icons.assignment_turned_in_outlined,
+    'Check the customer request, location, contact person, and expected outcome.',
   ),
   JobStep(
-    'Scan site QR',
+    'Confirm arrival',
     Icons.qr_code_scanner,
-    'Scan the site QR code to confirm arrival.',
+    'Confirm that the technician has arrived at the correct site.',
   ),
   JobStep(
-    'Toolbox talk',
+    'Complete safety check',
     Icons.health_and_safety,
-    'PPE photo and safety checklist required.',
+    'Record access notes, hazards, and any safety checks before work starts.',
   ),
   JobStep(
-    'Execute scope',
+    'Perform the service work',
     Icons.build,
-    'Replace RRU, align antenna, capture before/after photos.',
+    'Fix the issue, test the result, and record what was done.',
   ),
   JobStep(
-    'Scan material SN',
+    'Record parts and notes',
     Icons.qr_code_scanner,
-    'Consume issued RRU and return faulty unit.',
+    'Log any parts used, returned items, customer notes, or follow-up work.',
   ),
   JobStep(
-    'Submit closure',
+    'Submit service report',
     Icons.task_alt,
-    'Send the completed job to Admin for approval.',
+    'Upload photos, notes, customer sign-off, and submit for admin approval.',
   ),
 ];
 
 const materials = [
   MaterialLine(
-    'RRU 5909',
-    'SN: CMT-RRU-874332',
-    'Issued to WO-CMT-ESW-1048',
-    'Consume',
+    'Wi-Fi router',
+    'SN: RTR-874332',
+    'Issued to active job',
+    'Install',
     AppTheme.primary,
   ),
   MaterialLine(
-    'Faulty RRU',
-    'SN: OLD-RRU-192840',
+    'Faulty router',
+    'SN: OLD-RTR-192840',
     'Return to logistics',
     'Pending',
     AppTheme.warning,
   ),
   MaterialLine(
-    'Antenna clamp kit',
-    'BOM: CLAMP-KIT-4',
-    'Consumed onsite',
+    'Network cable kit',
+    'BOM: CABLE-KIT-4',
+    'Used onsite',
     'Matched',
     AppTheme.success,
   ),

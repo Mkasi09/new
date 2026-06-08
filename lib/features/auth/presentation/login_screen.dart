@@ -138,7 +138,7 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
         const SizedBox(height: 6),
         const Text(
-          'Sign in to manage work orders, site execution, materials, and billing readiness.',
+          'Sign in to manage jobs, site execution, materials, and billing readiness.',
           style: TextStyle(color: AppTheme.muted),
           textAlign: TextAlign.center,
         ),

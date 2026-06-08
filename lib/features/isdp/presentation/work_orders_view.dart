@@ -22,56 +22,139 @@ class WorkOrdersView extends StatefulWidget {
 
 class _WorkOrdersViewState extends State<WorkOrdersView> {
   String _filter = 'All';
+  final _searchController = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final filtered = _filter == 'All'
-        ? widget.workOrders
-        : widget.workOrders.where((order) => order.status == _filter).toList();
+    final activeJobs = widget.workOrders
+        .where((order) => order.status != 'Approved')
+        .toList();
+    final filtered = activeJobs.where(_matchesFilters).toList();
 
     return AppScrollView(
       children: [
         SectionTitle(_titleFor(widget.role)),
         const SizedBox(height: 10),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(
-                value: 'All',
-                label: Text('All'),
-                icon: Icon(Icons.all_inbox),
-              ),
-              ButtonSegment(
-                value: 'Dispatched',
-                label: Text('New'),
-                icon: Icon(Icons.outbound),
-              ),
-              ButtonSegment(
-                value: 'Onsite',
-                label: Text('Onsite'),
-                icon: Icon(Icons.location_on),
-              ),
-              ButtonSegment(
-                value: 'Complete',
-                label: Text('Done'),
-                icon: Icon(Icons.done_all),
-              ),
-            ],
-            selected: {_filter},
-            onSelectionChanged: (values) =>
-                setState(() => _filter = values.first),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final compact = constraints.maxWidth < 620;
+                final searchField = TextField(
+                  controller: _searchController,
+                  textInputAction: TextInputAction.search,
+                  decoration: InputDecoration(
+                    labelText: 'Search jobs',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: _query.isEmpty
+                        ? null
+                        : IconButton(
+                            tooltip: 'Clear search',
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() => _query = '');
+                            },
+                            icon: const Icon(Icons.close),
+                          ),
+                  ),
+                  onChanged: (value) => setState(() => _query = value.trim()),
+                );
+                final statusFilter = DropdownButtonFormField<String>(
+                  initialValue: _filter,
+                  decoration: const InputDecoration(
+                    labelText: 'Status',
+                    prefixIcon: Icon(Icons.filter_list),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'All', child: Text('All active')),
+                    DropdownMenuItem(
+                      value: 'Assigned to Supervisor',
+                      child: Text('Routed'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'Accepted by Supervisor',
+                      child: Text('Accepted'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'Dispatched',
+                      child: Text('Dispatched'),
+                    ),
+                    DropdownMenuItem(value: 'On Site', child: Text('On Site')),
+                    DropdownMenuItem(
+                      value: 'Submitted',
+                      child: Text('Submitted'),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) setState(() => _filter = value);
+                  },
+                );
+
+                if (compact) {
+                  return Column(
+                    children: [
+                      searchField,
+                      const SizedBox(height: 10),
+                      statusFilter,
+                    ],
+                  );
+                }
+
+                return Row(
+                  children: [
+                    Expanded(flex: 3, child: searchField),
+                    const SizedBox(width: 10),
+                    Expanded(flex: 2, child: statusFilter),
+                  ],
+                );
+              },
+            ),
           ),
         ),
         const SizedBox(height: 14),
-        ...filtered.map(
-          (order) => WorkOrderCard(
-            order: order,
-            onTap: () => widget.onOpenOrder(order),
+        if (filtered.isEmpty)
+          const Card(
+            child: Padding(
+              padding: EdgeInsets.all(18),
+              child: Text('No active jobs match the current filters.'),
+            ),
+          )
+        else
+          ...filtered.map(
+            (order) => WorkOrderCard(
+              order: order,
+              onTap: () => widget.onOpenOrder(order),
+            ),
           ),
-        ),
       ],
     );
+  }
+
+  bool _matchesFilters(WorkOrder order) {
+    final matchesStatus = _filter == 'All' || order.status == _filter;
+    if (!matchesStatus) return false;
+
+    final query = _query.toLowerCase();
+    if (query.isEmpty) return true;
+
+    return [
+      order.id,
+      order.site,
+      order.address,
+      order.scope,
+      order.status,
+      order.sla,
+      order.supervisor ?? '',
+      order.assignedTo ?? '',
+    ].any((value) => value.toLowerCase().contains(query));
   }
 
   String _titleFor(AppRole role) {

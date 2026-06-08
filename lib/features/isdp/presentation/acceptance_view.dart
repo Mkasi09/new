@@ -29,7 +29,7 @@ class AcceptanceView extends StatelessWidget {
         ),
         const _BillingGate(
           title: 'Invoice support pack',
-          detail: 'WO number, admin approval, BOM, photos, and signature.',
+          detail: 'Job number, admin approval, BOM, photos, and signature.',
           complete: true,
         ),
         const SizedBox(height: 14),
