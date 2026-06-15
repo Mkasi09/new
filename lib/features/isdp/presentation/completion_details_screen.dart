@@ -432,10 +432,16 @@ class _FullScreenSignaturePad extends StatelessWidget {
               ),
             ],
           ),
-          child: CustomPaint(
-            painter: SignaturePainter(strokes, strokeWidth: 3.2),
-            child: strokes.isEmpty
-                ? const Center(
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              CustomPaint(
+                painter: SignaturePainter(strokes, strokeWidth: 3.2),
+                child: const SizedBox.expand(),
+              ),
+              if (strokes.isEmpty)
+                const IgnorePointer(
+                  child: Center(
                     child: Text(
                       'SIGN HERE',
                       style: TextStyle(
@@ -444,8 +450,9 @@ class _FullScreenSignaturePad extends StatelessWidget {
                         letterSpacing: 1.4,
                       ),
                     ),
-                  )
-                : null,
+                  ),
+                ),
+            ],
           ),
         ),
       ),

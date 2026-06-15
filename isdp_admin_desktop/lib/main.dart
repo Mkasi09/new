@@ -25,7 +25,7 @@ class IsdpAdminApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Commit ISDP Admin',
+      title: 'PHEPHA MV ISDP Admin',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: AppColors.primary,
@@ -119,7 +119,7 @@ class _LoginPageState extends State<LoginPage> {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Color(0xFFF8FBFA), Color(0xFFE9F2EF)],
+            colors: [Colors.white, Color(0xFFF7F7F7)],
           ),
         ),
         child: Center(
@@ -131,10 +131,7 @@ class _LoginPageState extends State<LoginPage> {
                 children: [
                   const _BrandLogo(size: 104, showBackground: true),
                   const SizedBox(height: 18),
-                  const Text(
-                    'Commit ISDP Admin',
-                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900),
-                  ),
+                  const _BrandName(fontSize: 28, suffix: ' Admin'),
                   const SizedBox(height: 6),
                   const Text(
                     'Sign in to manage jobs, teams, materials, acceptance, and billing readiness.',
@@ -1953,8 +1950,9 @@ class _QrPreviewCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFF163C34),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.border),
       ),
       child: Row(
         children: [
@@ -1976,7 +1974,7 @@ class _QrPreviewCard extends StatelessWidget {
                 const Text(
                   'Site QR Code',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: AppColors.ink,
                     fontSize: 20,
                     fontWeight: FontWeight.w900,
                   ),
@@ -1984,7 +1982,7 @@ class _QrPreviewCard extends StatelessWidget {
                 const SizedBox(height: 6),
                 Text(
                   '${order.siteCode} - ready to view, save, or send.',
-                  style: const TextStyle(color: Colors.white70),
+                  style: const TextStyle(color: AppColors.muted),
                 ),
                 const SizedBox(height: 14),
                 FilledButton.icon(
@@ -3082,7 +3080,10 @@ class _Sidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: 252,
-      color: const Color(0xFF12322C),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(right: BorderSide(color: AppColors.border)),
+      ),
       padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3096,24 +3097,17 @@ class _Sidebar extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Row(
                   children: [
-                    const _BrandLogo(size: 48, darkSurface: true),
+                    const _BrandLogo(size: 52, showBackground: true),
                     const SizedBox(width: 12),
                     const Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            'Commit ISDP',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
+                          _BrandName(fontSize: 17),
                           Text(
                             'Admin Console',
                             style: TextStyle(
-                              color: Colors.white60,
+                              color: AppColors.muted,
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
                               letterSpacing: 0.5,
@@ -3136,13 +3130,13 @@ class _Sidebar extends StatelessWidget {
               onTap: () => onSelected(section),
             ),
           const Spacer(),
-          Text(userEmail, style: const TextStyle(color: Colors.white70)),
+          Text(userEmail, style: const TextStyle(color: AppColors.muted)),
           const SizedBox(height: 10),
           OutlinedButton.icon(
             onPressed: onSignOut,
             icon: const Icon(Icons.logout),
             label: const Text('Sign out'),
-            style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
+            style: OutlinedButton.styleFrom(foregroundColor: AppColors.primary),
           ),
         ],
       ),
@@ -3168,18 +3162,22 @@ class _NavItem extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        color: selected ? Colors.white.withValues(alpha: 0.12) : null,
+        color: selected ? AppColors.primary.withValues(alpha: 0.1) : null,
         borderRadius: BorderRadius.circular(8),
       ),
       child: ListTile(
         dense: true,
         onTap: onTap,
         minLeadingWidth: 20,
-        leading: Icon(icon, color: Colors.white, size: 21),
+        leading: Icon(
+          icon,
+          color: selected ? AppColors.primary : AppColors.muted,
+          size: 21,
+        ),
         title: Text(
           label,
           style: TextStyle(
-            color: selected ? Colors.white : Colors.white70,
+            color: selected ? AppColors.primary : AppColors.ink,
             fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
           ),
         ),
@@ -3985,15 +3983,10 @@ class _AnimatedLogoLoader extends StatefulWidget {
 }
 
 class _BrandLogo extends StatelessWidget {
-  const _BrandLogo({
-    required this.size,
-    this.showBackground = false,
-    this.darkSurface = false,
-  });
+  const _BrandLogo({required this.size, this.showBackground = false});
 
   final double size;
   final bool showBackground;
-  final bool darkSurface;
 
   @override
   Widget build(BuildContext context) {
@@ -4003,21 +3996,15 @@ class _BrandLogo extends StatelessWidget {
       height: size,
       padding: EdgeInsets.all(padding),
       decoration: BoxDecoration(
-        color: showBackground
-            ? Colors.white
-            : darkSurface
-            ? Colors.white.withValues(alpha: 0.08)
-            : Colors.transparent,
+        color: showBackground ? Colors.white : Colors.transparent,
         borderRadius: BorderRadius.circular(size * 0.18),
         border: showBackground
-            ? Border.all(color: AppColors.border)
-            : darkSurface
-            ? Border.all(color: Colors.white.withValues(alpha: 0.14))
+            ? Border.all(color: const Color(0xFFD6D6D6), width: 1.2)
             : null,
         boxShadow: showBackground
             ? const [
                 BoxShadow(
-                  color: Color(0x1A12322C),
+                  color: Color(0x1F000000),
                   blurRadius: 24,
                   offset: Offset(0, 8),
                 ),
@@ -4028,7 +4015,36 @@ class _BrandLogo extends StatelessWidget {
         'assets/logo1.png',
         fit: BoxFit.contain,
         filterQuality: FilterQuality.high,
-        semanticLabel: 'Commit ISDP logo',
+        semanticLabel: 'PHEPHA MV ISDP logo',
+      ),
+    );
+  }
+}
+
+class _BrandName extends StatelessWidget {
+  const _BrandName({required this.fontSize, this.suffix = ''});
+
+  final double fontSize;
+  final String suffix;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text.rich(
+      TextSpan(
+        children: [
+          const TextSpan(text: 'PHEPHA MV '),
+          const TextSpan(
+            text: 'ISDP',
+            style: TextStyle(color: AppColors.primary),
+          ),
+          TextSpan(text: suffix),
+        ],
+      ),
+      textAlign: TextAlign.center,
+      style: TextStyle(
+        color: AppColors.ink,
+        fontSize: fontSize,
+        fontWeight: FontWeight.w900,
       ),
     );
   }
@@ -4113,14 +4129,14 @@ class _AnimatedLogoLoaderState extends State<_AnimatedLogoLoader>
 }
 
 class AppColors {
-  static const primary = Color(0xFF1F6F5B);
+  static const primary = Color(0xFFD32F2F);
   static const success = Color(0xFF21845A);
   static const warning = Color(0xFFB36B00);
-  static const danger = Color(0xFFB3261E);
-  static const ink = Color(0xFF1A2420);
-  static const muted = Color(0xFF62736C);
-  static const surface = Color(0xFFF6F8F7);
-  static const border = Color(0xFFE1E8E5);
+  static const danger = Color(0xFFB71C1C);
+  static const ink = Color(0xFF212121);
+  static const muted = Color(0xFF6B6B6B);
+  static const surface = Color(0xFFF7F7F7);
+  static const border = Color(0xFFE2E2E2);
 }
 
 Map<String, dynamic> _decode(http.Response response) {
@@ -4272,7 +4288,7 @@ Future<File> _writeQrPdf(WorkOrder order) async {
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
                   pw.Text(
-                    'Commit ISDP',
+                    'PHEPHA MV ISDP',
                     style: pw.TextStyle(
                       fontSize: 24,
                       fontWeight: pw.FontWeight.bold,

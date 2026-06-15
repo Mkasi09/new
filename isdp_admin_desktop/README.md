@@ -1,6 +1,6 @@
-# Commit ISDP Admin Desktop
+# PHEPHA MV ISDP Admin Desktop
 
-Separate Flutter desktop project for the Commit ISDP admin console.
+Separate Flutter desktop project for the PHEPHA MV ISDP admin console.
 
 This app is built for desktop and talks to the existing Firebase project through
 Firebase REST APIs, so Windows can sign in and manage the same `work_orders`

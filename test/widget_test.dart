@@ -37,6 +37,15 @@ void main() {
     await tester.pump();
 
     expect(find.text('SIGN HERE'), findsNothing);
+    final paintedCanvas = find.byWidgetPredicate(
+      (widget) => widget is CustomPaint && widget.painter is SignaturePainter,
+    );
+    final canvasSize = tester.getSize(paintedCanvas);
+    expect(canvasSize.width, greaterThan(200));
+    expect(canvasSize.height, greaterThan(200));
+    final customPaint = tester.widget<CustomPaint>(paintedCanvas);
+    final painter = customPaint.painter! as SignaturePainter;
+    expect(painter.strokes.last.length, greaterThan(1));
     final button = tester.widget<FilledButton>(
       find.widgetWithText(FilledButton, 'Use this signature'),
     );
