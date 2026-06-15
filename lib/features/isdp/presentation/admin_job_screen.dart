@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../app/theme/app_theme.dart';
 import '../domain/entities.dart';
 import 'widgets/common.dart';
+import 'widgets/evidence_photo_thumbnail.dart';
 
 class AdminJobScreen extends StatelessWidget {
   const AdminJobScreen({
@@ -39,47 +40,9 @@ class AdminJobScreen extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 12),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  order.site,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  order.address,
-                  style: const TextStyle(color: AppTheme.muted),
-                ),
-                const SizedBox(height: 12),
-                Text(order.scope),
-                const SizedBox(height: 14),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    InfoChip(icon: Icons.badge_outlined, label: order.id),
-                    InfoChip(icon: Icons.schedule_outlined, label: order.sla),
-                    InfoChip(
-                      icon: Icons.supervisor_account_outlined,
-                      label: order.supervisor ?? 'No supervisor',
-                    ),
-                    InfoChip(
-                      icon: Icons.person_outline,
-                      label: order.assignedTo ?? 'No technician',
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
+        JobOverviewPanel(order: order),
+        const SizedBox(height: 14),
+        WorkDurationPanel(order: order),
         const SizedBox(height: 14),
         const SectionTitle('QR Code'),
         const SizedBox(height: 10),
@@ -115,11 +78,13 @@ class AdminJobScreen extends StatelessWidget {
           title: 'Before photo',
           detail: 'Photo captured before work started.',
           complete: hasBefore,
+          photoData: order.evidencePhotos['before'],
         ),
         _AdminEvidenceCard(
           title: 'After photo',
           detail: 'Photo captured after work was completed.',
           complete: hasAfter,
+          photoData: order.evidencePhotos['after'],
         ),
       ],
     );
@@ -131,11 +96,13 @@ class _AdminEvidenceCard extends StatelessWidget {
     required this.title,
     required this.detail,
     required this.complete,
+    required this.photoData,
   });
 
   final String title;
   final String detail;
   final bool complete;
+  final String? photoData;
 
   @override
   Widget build(BuildContext context) {
@@ -146,12 +113,13 @@ class _AdminEvidenceCard extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              IconPill(
-                icon: complete
-                    ? Icons.check_circle_outline
-                    : Icons.image_not_supported_outlined,
-                color: color,
+              EvidencePhotoViewer(
+                photoData: photoData,
+                complete: complete,
+                title: title,
+                size: 92,
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -164,10 +132,17 @@ class _AdminEvidenceCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 3),
                     Text(detail, style: const TextStyle(color: AppTheme.muted)),
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: StatusChip(
+                        label: complete ? 'Photo visible' : 'Missing',
+                        color: color,
+                      ),
+                    ),
                   ],
                 ),
               ),
-              StatusChip(label: complete ? 'Saved' : 'Missing', color: color),
             ],
           ),
         ),

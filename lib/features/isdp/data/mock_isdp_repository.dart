@@ -12,6 +12,9 @@ class MockIsdpRepository implements IsdpRepository {
   Stream<List<WorkOrder>> watchWorkOrders() => Stream.value(getWorkOrders());
 
   @override
+  Stream<SyncStatus> watchSyncStatus() => Stream.value(SyncStatus.online);
+
+  @override
   List<Metric> getDashboardMetrics() => dashboardMetrics;
 
   @override
@@ -35,8 +38,12 @@ class MockIsdpRepository implements IsdpRepository {
   @override
   Future<void> saveEvidence(
     WorkOrder order,
-    List<String> evidenceSlots,
-  ) async {}
+    List<String> evidenceSlots, {
+    Map<String, String> evidencePhotos = const {},
+  }) async {}
+
+  @override
+  Future<void> saveCompletionDetails(WorkOrder order) async {}
 
   @override
   Future<void> submitCompletion(WorkOrder order) async {}

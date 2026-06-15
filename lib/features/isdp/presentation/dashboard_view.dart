@@ -1,15 +1,9 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../../../core/domain/app_role.dart';
 import '../domain/entities.dart';
 import 'widgets/common.dart';
-
-void _showInfo(BuildContext context, String message) {
-  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-}
 
 class DashboardView extends StatefulWidget {
   const DashboardView({
@@ -23,15 +17,15 @@ class DashboardView extends StatefulWidget {
     required this.onCreateJob,
     required this.onOpenAnalytics,
     required this.onOpenReviewQueue,
+    this.onAddUser,
     required this.onOpenTeamQueue,
     required this.onOpenSupervisorJob,
     required this.onAcceptOrder,
     required this.onOpenReviewOrder,
     required this.onAssignOrder,
-    required this.onMessageOrder,
-    required this.onFollowUpOrder,
     required this.onScanArrival,
     required this.onUploadEvidence,
+    required this.onOpenCompletionDetails,
     required this.onSubmitCompletion,
   });
 
@@ -44,15 +38,15 @@ class DashboardView extends StatefulWidget {
   final VoidCallback onCreateJob;
   final VoidCallback onOpenAnalytics;
   final VoidCallback onOpenReviewQueue;
+  final VoidCallback? onAddUser;
   final VoidCallback onOpenTeamQueue;
   final ValueChanged<WorkOrder> onOpenSupervisorJob;
   final Future<void> Function(WorkOrder) onAcceptOrder;
   final ValueChanged<WorkOrder> onOpenReviewOrder;
   final Future<void> Function(WorkOrder) onAssignOrder;
-  final ValueChanged<WorkOrder> onMessageOrder;
-  final ValueChanged<WorkOrder> onFollowUpOrder;
   final Future<bool?> Function(WorkOrder) onScanArrival;
   final Future<List<String>?> Function(WorkOrder) onUploadEvidence;
+  final ValueChanged<WorkOrder> onOpenCompletionDetails;
   final Future<void> Function(WorkOrder) onSubmitCompletion;
 
   @override
@@ -100,6 +94,7 @@ class _DashboardViewState extends State<DashboardView> {
         onCreateJob: widget.onCreateJob,
         onOpenAnalytics: widget.onOpenAnalytics,
         onOpenReviewQueue: widget.onOpenReviewQueue,
+        onAddUser: widget.onAddUser,
         onOpenReviewOrder: widget.onOpenReviewOrder,
       ),
       AppRole.supervisor => _SupervisorHome(
@@ -109,11 +104,10 @@ class _DashboardViewState extends State<DashboardView> {
         onOpenSupervisorJob: widget.onOpenSupervisorJob,
         onAcceptOrder: widget.onAcceptOrder,
         onAssignOrder: widget.onAssignOrder,
-        onMessageOrder: widget.onMessageOrder,
-        onFollowUpOrder: widget.onFollowUpOrder,
       ),
       AppRole.technician => _TechnicianHome(
         order: widget.selectedOrder,
+        pendingJobs: _pendingTechnicianJobs(widget.workOrders),
         jobSteps: widget.jobSteps,
         materials: widget.materials,
         arrivalVerified: arrivalVerified,
@@ -122,6 +116,7 @@ class _DashboardViewState extends State<DashboardView> {
         onScanSiteQr: _scanSiteQr,
         onUploadImages: _uploadImages,
         onOpenOrder: widget.onOpenOrder,
+        onOpenCompletionDetails: widget.onOpenCompletionDetails,
         onSubmitCompletion: widget.onSubmitCompletion,
       ),
     };
@@ -173,6 +168,14 @@ class _DashboardViewState extends State<DashboardView> {
   bool _hasAllEvidenceSlots(List<String> slots) {
     return const ['before', 'after'].every(slots.contains);
   }
+
+  int _pendingTechnicianJobs(List<WorkOrder> orders) {
+    return orders
+        .where(
+          (order) => order.status != 'Submitted' && order.status != 'Approved',
+        )
+        .length;
+  }
 }
 
 class _AdminHome extends StatelessWidget {
@@ -182,6 +185,7 @@ class _AdminHome extends StatelessWidget {
     required this.onCreateJob,
     required this.onOpenAnalytics,
     required this.onOpenReviewQueue,
+    this.onAddUser,
     required this.onOpenReviewOrder,
   });
 
@@ -190,6 +194,7 @@ class _AdminHome extends StatelessWidget {
   final VoidCallback onCreateJob;
   final VoidCallback onOpenAnalytics;
   final VoidCallback onOpenReviewQueue;
+  final VoidCallback? onAddUser;
   final ValueChanged<WorkOrder> onOpenReviewOrder;
 
   @override
@@ -235,7 +240,6 @@ class _AdminHome extends StatelessWidget {
         const SizedBox(height: 10),
         _ActionGrid(
           actions: [
-            _RoleAction(Icons.add_task, 'Create job', onCreateJob),
             _RoleAction(
               Icons.fact_check_outlined,
               'Review',
@@ -243,6 +247,12 @@ class _AdminHome extends StatelessWidget {
               badgeCount: unreviewed,
             ),
             _RoleAction(Icons.analytics_outlined, 'Analytics', onOpenAnalytics),
+            if (onAddUser != null)
+              _RoleAction(
+                Icons.person_add_alt_1_outlined,
+                'Add User',
+                onAddUser!,
+              ),
           ],
         ),
         const SizedBox(height: 18),
@@ -276,8 +286,6 @@ class _SupervisorHome extends StatelessWidget {
     required this.onOpenSupervisorJob,
     required this.onAcceptOrder,
     required this.onAssignOrder,
-    required this.onMessageOrder,
-    required this.onFollowUpOrder,
   });
 
   final List<WorkOrder> workOrders;
@@ -286,8 +294,6 @@ class _SupervisorHome extends StatelessWidget {
   final ValueChanged<WorkOrder> onOpenSupervisorJob;
   final Future<void> Function(WorkOrder) onAcceptOrder;
   final Future<void> Function(WorkOrder) onAssignOrder;
-  final ValueChanged<WorkOrder> onMessageOrder;
-  final ValueChanged<WorkOrder> onFollowUpOrder;
 
   @override
   Widget build(BuildContext context) {
@@ -401,31 +407,6 @@ class _SupervisorHome extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(height: 18),
-        const SectionTitle('Supervisor Actions'),
-        const SizedBox(height: 10),
-        _ActionGrid(
-          actions: [
-            _RoleAction(
-              Icons.message_outlined,
-              'Message',
-              () => onMessageOrder(selectedOrder),
-            ),
-            _RoleAction(
-              Icons.call_outlined,
-              'Follow up',
-              () => onFollowUpOrder(selectedOrder),
-            ),
-            _RoleAction(
-              Icons.timer_outlined,
-              'Due',
-              () => _showInfo(
-                context,
-                '${selectedOrder.id}: ${selectedOrder.sla}',
-              ),
-            ),
-          ],
-        ),
       ],
     );
   }
@@ -434,6 +415,7 @@ class _SupervisorHome extends StatelessWidget {
 class _TechnicianHome extends StatelessWidget {
   const _TechnicianHome({
     required this.order,
+    required this.pendingJobs,
     required this.jobSteps,
     required this.materials,
     required this.arrivalVerified,
@@ -442,10 +424,12 @@ class _TechnicianHome extends StatelessWidget {
     required this.onScanSiteQr,
     required this.onUploadImages,
     required this.onOpenOrder,
+    required this.onOpenCompletionDetails,
     required this.onSubmitCompletion,
   });
 
   final WorkOrder order;
+  final int pendingJobs;
   final List<JobStep> jobSteps;
   final List<MaterialLine> materials;
   final bool arrivalVerified;
@@ -454,83 +438,75 @@ class _TechnicianHome extends StatelessWidget {
   final ValueChanged<BuildContext> onScanSiteQr;
   final ValueChanged<BuildContext> onUploadImages;
   final ValueChanged<WorkOrder> onOpenOrder;
+  final ValueChanged<WorkOrder> onOpenCompletionDetails;
   final Future<void> Function(WorkOrder) onSubmitCompletion;
 
   @override
   Widget build(BuildContext context) {
     final submitted = order.status == 'Submitted' || order.status == 'Approved';
-    final evidenceStep = _nextEvidenceStep(evidenceSlots);
+    final beforeUploaded = evidenceSlots.contains('before');
+    final afterUploaded = evidenceSlots.contains('after');
+    final completionReady =
+        order.technicianNotes?.trim().isNotEmpty == true &&
+        order.customerName?.trim().isNotEmpty == true &&
+        order.customerSignature?.isNotEmpty == true;
+    final progress = _technicianProgress(
+      arrivalVerified: arrivalVerified,
+      beforeUploaded: beforeUploaded,
+      afterUploaded: afterUploaded,
+      completionReady: completionReady,
+      submitted: submitted,
+    );
 
     return AppScrollView(
       children: [
-        _TechnicianHero(order: order),
-        const SizedBox(height: 14),
+        _TechnicianHero(order: order, progress: progress),
+        const SizedBox(height: 12),
+        _PendingJobsCard(count: pendingJobs),
+        const SizedBox(height: 12),
         _CountdownCard(order: order, arrivalVerified: arrivalVerified),
-        const SizedBox(height: 14),
-        const SectionTitle('Next Steps'),
-        const SizedBox(height: 10),
-        _WorkActionCard(
-          step: 1,
-          title: 'Confirm arrival',
-          detail: 'Scan the site QR when you arrive.',
-          complete: arrivalVerified,
-          enabled: true,
-          buttonLabel: 'Scan QR',
-          onTap: arrivalVerified ? null : () => onScanSiteQr(context),
+        const SizedBox(height: 12),
+        _TodayActionPanel(
+          progress: progress,
+          arrivalVerified: arrivalVerified,
+          beforeUploaded: beforeUploaded,
+          afterUploaded: afterUploaded,
+          completionReady: completionReady,
+          submitted: submitted,
+          onScanSiteQr: arrivalVerified ? null : () => onScanSiteQr(context),
+          onUploadBefore: beforeUploaded ? null : () => onUploadImages(context),
+          onUploadAfter: afterUploaded ? null : () => onUploadImages(context),
+          onCompletionDetails: submitted
+              ? null
+              : () => onOpenCompletionDetails(order),
+          onSubmitCompletion: submitted
+              ? null
+              : !completionReady
+              ? null
+              : () => onSubmitCompletion(order),
         ),
-        _WorkActionCard(
-          step: 2,
-          title: evidenceStep.title,
-          detail: evidenceStep.detail,
-          complete: evidenceUploaded,
-          enabled: arrivalVerified,
-          buttonLabel: evidenceStep.buttonLabel,
-          onTap: evidenceUploaded ? null : () => onUploadImages(context),
-        ),
-        _WorkActionCard(
-          step: 3,
-          title: 'Submit job',
-          detail: 'Send the completed job pack for approval.',
-          complete: submitted,
-          enabled: arrivalVerified && evidenceUploaded,
-          buttonLabel: 'Submit',
-          onTap: submitted ? null : () => onSubmitCompletion(order),
-        ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 12),
         _TechnicianJobDetails(order: order, onTap: () => onOpenOrder(order)),
       ],
     );
   }
 
-  _EvidenceStep _nextEvidenceStep(List<String> uploadedSlots) {
-    if (!uploadedSlots.contains('before')) {
-      return const _EvidenceStep(
-        'Upload before photo',
-        'Capture the site or issue before starting the work.',
-        'Upload Before',
-      );
-    }
-    if (!uploadedSlots.contains('after')) {
-      return const _EvidenceStep(
-        'Upload after photo',
-        'Capture the completed work after the job is done.',
-        'Upload After',
-      );
-    }
-    return const _EvidenceStep(
-      'Evidence complete',
-      'Before and after photos are saved.',
-      'Done',
-    );
+  double _technicianProgress({
+    required bool arrivalVerified,
+    required bool beforeUploaded,
+    required bool afterUploaded,
+    required bool completionReady,
+    required bool submitted,
+  }) {
+    final completed = [
+      arrivalVerified,
+      beforeUploaded,
+      afterUploaded,
+      completionReady,
+      submitted,
+    ].where((done) => done).length;
+    return completed / 5;
   }
-}
-
-class _EvidenceStep {
-  const _EvidenceStep(this.title, this.detail, this.buttonLabel);
-
-  final String title;
-  final String detail;
-  final String buttonLabel;
 }
 
 class _CountdownCard extends StatelessWidget {
@@ -593,6 +569,35 @@ class _CountdownCard extends StatelessWidget {
   }
 }
 
+class _PendingJobsCard extends StatelessWidget {
+  const _PendingJobsCard({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = count > 0 ? AppTheme.warning : AppTheme.success;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            IconPill(icon: Icons.pending_actions_outlined, color: color),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                count == 1 ? '1 pending job' : '$count pending jobs',
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+            ),
+            StatusChip(label: count > 0 ? 'Open' : 'Clear', color: color),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _CountdownFrame extends StatelessWidget {
   const _CountdownFrame({
     required this.icon,
@@ -610,10 +615,19 @@ class _CountdownFrame extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(16),
         child: Row(
           children: [
-            IconPill(icon: icon, color: color),
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: color.withValues(alpha: 0.18)),
+              ),
+              child: Icon(icon, color: color),
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -621,14 +635,21 @@ class _CountdownFrame extends StatelessWidget {
                 children: [
                   Text(
                     title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: color,
                       fontSize: 17,
                       fontWeight: FontWeight.w900,
                     ),
                   ),
-                  const SizedBox(height: 3),
-                  Text(detail, style: const TextStyle(color: AppTheme.muted)),
+                  const SizedBox(height: 4),
+                  Text(
+                    detail,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: AppTheme.muted),
+                  ),
                 ],
               ),
             ),
@@ -714,53 +735,362 @@ class _RoleHero extends StatelessWidget {
 }
 
 class _TechnicianHero extends StatelessWidget {
-  const _TechnicianHero({required this.order});
+  const _TechnicianHero({required this.order, required this.progress});
 
   final WorkOrder order;
+  final double progress;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: AppTheme.primary,
+        gradient: const LinearGradient(
+          colors: [Color(0xFF0F5FA8), Color(0xFF118A9E)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
         borderRadius: BorderRadius.circular(8),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primary.withValues(alpha: 0.18),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
       ),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.route, color: Colors.white, size: 34),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Today\'s Job',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 23,
-                    fontWeight: FontWeight.w900,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.22),
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  order.site,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
+                child: const Icon(Icons.route, color: Colors.white, size: 28),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Today\'s Job',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      order.site,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            order.address,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white70),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: LinearProgressIndicator(
+                    value: progress,
+                    minHeight: 8,
+                    backgroundColor: Colors.white.withValues(alpha: 0.22),
+                    valueColor: const AlwaysStoppedAnimation<Color>(
+                      Color(0xFFB8F1E7),
+                    ),
                   ),
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  '${order.address} - ${order.sla}',
-                  style: const TextStyle(color: Colors.white70),
-                ),
-              ],
+              ),
+              const SizedBox(width: 12),
+              _HeroProgressPill(value: '${(progress * 100).round()}%'),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _HeroInfoPill(icon: Icons.badge_outlined, label: order.id),
+              _HeroInfoPill(icon: Icons.schedule_outlined, label: order.sla),
+              _HeroInfoPill(
+                icon: Icons.priority_high,
+                label: order.priority.label,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroProgressPill extends StatelessWidget {
+  const _HeroProgressPill({required this.value});
+
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+      ),
+      child: Text(
+        value,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w900,
+          fontSize: 12,
+        ),
+      ),
+    );
+  }
+}
+
+class _HeroInfoPill extends StatelessWidget {
+  const _HeroInfoPill({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.white, size: 15),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+class _TodayActionPanel extends StatelessWidget {
+  const _TodayActionPanel({
+    required this.progress,
+    required this.arrivalVerified,
+    required this.beforeUploaded,
+    required this.afterUploaded,
+    required this.completionReady,
+    required this.submitted,
+    required this.onScanSiteQr,
+    required this.onUploadBefore,
+    required this.onUploadAfter,
+    required this.onCompletionDetails,
+    required this.onSubmitCompletion,
+  });
+
+  final double progress;
+  final bool arrivalVerified;
+  final bool beforeUploaded;
+  final bool afterUploaded;
+  final bool completionReady;
+  final bool submitted;
+  final VoidCallback? onScanSiteQr;
+  final VoidCallback? onUploadBefore;
+  final VoidCallback? onUploadAfter;
+  final VoidCallback? onCompletionDetails;
+  final VoidCallback? onSubmitCompletion;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _SectionHeader(
+              title: 'Next Steps',
+              trailing: '${(progress * 100).round()}% complete',
+            ),
+            const SizedBox(height: 12),
+            _CompactWorkActionRow(
+              icon: Icons.qr_code_scanner,
+              title: 'Confirm arrival',
+              complete: arrivalVerified,
+              enabled: true,
+              buttonLabel: 'Scan QR',
+              onTap: onScanSiteQr,
+            ),
+            const Divider(height: 18),
+            _CompactWorkActionRow(
+              icon: Icons.photo_camera_outlined,
+              title: 'Upload before photo',
+              complete: beforeUploaded,
+              enabled: arrivalVerified,
+              buttonLabel: 'Upload Before',
+              onTap: onUploadBefore,
+            ),
+            const Divider(height: 18),
+            _CompactWorkActionRow(
+              icon: Icons.photo_library_outlined,
+              title: 'Upload after photo',
+              complete: afterUploaded,
+              enabled: arrivalVerified && beforeUploaded,
+              buttonLabel: 'Upload After',
+              onTap: onUploadAfter,
+            ),
+            const Divider(height: 18),
+            _CompactWorkActionRow(
+              icon: Icons.draw_outlined,
+              title: 'Notes and customer sign-off',
+              complete: completionReady,
+              enabled: arrivalVerified,
+              buttonLabel: completionReady ? 'Edit' : 'Complete',
+              onTap: onCompletionDetails,
+            ),
+            const Divider(height: 18),
+            _CompactWorkActionRow(
+              icon: Icons.outbox_outlined,
+              title: 'Submit job',
+              complete: submitted,
+              enabled:
+                  arrivalVerified &&
+                  beforeUploaded &&
+                  afterUploaded &&
+                  completionReady,
+              buttonLabel: 'Submit',
+              onTap: onSubmitCompletion,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CompactWorkActionRow extends StatelessWidget {
+  const _CompactWorkActionRow({
+    required this.icon,
+    required this.title,
+    required this.complete,
+    required this.enabled,
+    required this.buttonLabel,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final bool complete;
+  final bool enabled;
+  final String buttonLabel;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = complete
+        ? AppTheme.success
+        : enabled
+        ? AppTheme.primary
+        : AppTheme.muted;
+
+    return Row(
+      children: [
+        IconPill(
+          icon: complete ? Icons.check_circle_outline : icon,
+          color: color,
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w900),
+          ),
+        ),
+        const SizedBox(width: 10),
+        if (complete)
+          const StatusChip(label: 'Done', color: AppTheme.success)
+        else
+          FilledButton(
+            onPressed: enabled ? onTap : null,
+            child: Text(buttonLabel),
+          ),
+      ],
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.title, required this.trailing});
+
+  final String title;
+  final String trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(child: SectionTitle(title)),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+          decoration: BoxDecoration(
+            color: AppTheme.secondary.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            trailing,
+            style: const TextStyle(
+              color: AppTheme.secondary,
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -773,55 +1103,7 @@ class _TechnicianJobDetails extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Expanded(
-                    child: Text(
-                      'Job Details',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ),
-                  StatusChip(
-                    label: order.status,
-                    color: workOrderStatusColor(order.status),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Text(
-                order.scope,
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  InfoChip(icon: Icons.badge_outlined, label: order.id),
-                  if (order.supervisor != null)
-                    InfoChip(
-                      icon: Icons.supervisor_account_outlined,
-                      label: order.supervisor!,
-                    ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+    return JobOverviewPanel(order: order, onTap: onTap);
   }
 }
 
@@ -1059,117 +1341,6 @@ class _EmptyRoleCard extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _WorkActionCard extends StatelessWidget {
-  const _WorkActionCard({
-    required this.step,
-    required this.title,
-    required this.detail,
-    required this.complete,
-    required this.enabled,
-    required this.buttonLabel,
-    required this.onTap,
-  });
-
-  final int step;
-  final String title;
-  final String detail;
-  final bool complete;
-  final bool enabled;
-  final String buttonLabel;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = complete
-        ? AppTheme.success
-        : enabled
-        ? AppTheme.primary
-        : AppTheme.muted;
-    final actionButton = complete
-        ? const Text(
-            'Done',
-            style: TextStyle(
-              color: AppTheme.success,
-              fontWeight: FontWeight.w800,
-            ),
-          )
-        : FilledButton(
-            onPressed: enabled ? onTap : null,
-            child: Text(buttonLabel),
-          );
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Card(
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: enabled && !complete ? onTap : null,
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _StepBadge(step: step, complete: complete, color: color),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: const TextStyle(fontWeight: FontWeight.w900),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        detail,
-                        style: const TextStyle(color: AppTheme.muted),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 10),
-                actionButton,
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _StepBadge extends StatelessWidget {
-  const _StepBadge({
-    required this.step,
-    required this.complete,
-    required this.color,
-  });
-
-  final int step;
-  final bool complete;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 38,
-      height: 38,
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Center(
-        child: complete
-            ? Icon(Icons.check, color: color)
-            : Text(
-                '$step',
-                style: TextStyle(color: color, fontWeight: FontWeight.w900),
-              ),
       ),
     );
   }

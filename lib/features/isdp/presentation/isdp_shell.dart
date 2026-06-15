@@ -7,15 +7,16 @@ import 'package:printing/printing.dart';
 
 import '../../../core/domain/app_role.dart';
 import '../../auth/domain/auth_repository.dart';
-import '../data/demo_people.dart';
 import '../data/mock_isdp_repository.dart';
 import '../domain/entities.dart';
 import '../domain/isdp_repository.dart';
 import 'account_view.dart';
+import 'add_user_screen.dart';
 import 'admin_job_screen.dart';
 import 'analytics_view.dart';
 import 'assign_technician_screen.dart';
 import 'create_job_screen.dart';
+import 'completion_details_screen.dart';
 import 'dashboard_view.dart';
 import 'empty_jobs_view.dart';
 import 'qr_arrival_scan_screen.dart';
@@ -31,22 +32,26 @@ enum _WorkflowView {
   assignTechnician,
   scanQr,
   uploadEvidence,
+  completionDetails,
   analytics,
   reviewQueue,
   reviewJob,
   supervisorQueue,
   supervisorJob,
+  addUser,
 }
 
 class IsdpShell extends StatefulWidget {
   const IsdpShell({
     super.key,
     this.initialRole,
+    this.userProfile,
     this.authRepository,
     this.isdpRepository,
   });
 
   final AppRole? initialRole;
+  final AppUserProfile? userProfile;
   final AuthRepository? authRepository;
   final IsdpRepository? isdpRepository;
 
@@ -56,22 +61,25 @@ class IsdpShell extends StatefulWidget {
 
 class _IsdpShellState extends State<IsdpShell> {
   int _tab = 0;
-  late AppRole _role = widget.initialRole ?? AppRole.technician;
+  late final AppRole _role = widget.initialRole ?? AppRole.technician;
   late final IsdpRepository _repository =
       widget.isdpRepository ?? const MockIsdpRepository();
   late List<WorkOrder> _workOrders = List.of(_repository.getWorkOrders());
-  late DemoPerson _demoPerson = defaultDemoPersonForRole(_role);
   String? _selectedOrderId;
   _WorkflowView? _workflowView;
   WorkOrder? _assigningOrder;
   WorkOrder? _scanningOrder;
   WorkOrder? _uploadingOrder;
+  WorkOrder? _completionOrder;
   WorkOrder? _reviewingOrder;
   WorkOrder? _supervisorOrder;
   WorkOrder? _adminOrder;
   bool _returnToReviewQueue = false;
   Completer<bool?>? _scanCompleter;
   Completer<List<String>?>? _uploadCompleter;
+  final List<_AppNotification> _notifications = [];
+  final Map<String, WorkOrder> _knownOrders = {};
+  bool _notificationsInitialized = false;
 
   @override
   Widget build(BuildContext context) {
@@ -83,25 +91,19 @@ class _IsdpShellState extends State<IsdpShell> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: Row(
-            children: [
-              Image.asset('assets/logo.png', height: 30),
-              const SizedBox(width: 10),
-              const Expanded(child: Text('Commit ISDP')),
-            ],
-          ),
+          title: const _AppBarBrandTitle(),
           actions: [
-            IconButton(
-              tooltip: 'Sync',
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('All local changes are synced.'),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.cloud_done_outlined),
+            StreamBuilder<SyncStatus>(
+              stream: _repository.watchSyncStatus(),
+              initialData: SyncStatus.online,
+              builder: (context, snapshot) =>
+                  _SyncStatusButton(status: snapshot.data ?? SyncStatus.online),
             ),
+            _NotificationButton(
+              count: _notifications.where((item) => !item.read).length,
+              onPressed: _showNotifications,
+            ),
+            const SizedBox(width: 6),
           ],
         ),
         body: StreamBuilder<List<WorkOrder>>(
@@ -109,6 +111,7 @@ class _IsdpShellState extends State<IsdpShell> {
           initialData: _workOrders,
           builder: (context, snapshot) {
             final liveOrders = _mergeWorkOrders(snapshot.data ?? const []);
+            _observeOrderNotifications(liveOrders);
             final visibleOrders = _visibleOrdersForRole(liveOrders);
             final selectedOrder = _selectedOrder(visibleOrders);
             final workflowPage = _buildWorkflowPage(visibleOrders);
@@ -128,15 +131,17 @@ class _IsdpShellState extends State<IsdpShell> {
                   onCreateJob: _openCreateJobScreen,
                   onOpenAnalytics: _openAnalyticsScreen,
                   onOpenReviewQueue: _openReviewQueueScreen,
+                  onAddUser: widget.authRepository == null
+                      ? null
+                      : _openAddUserScreen,
                   onOpenTeamQueue: _openSupervisorQueueScreen,
                   onOpenSupervisorJob: _openSupervisorJobScreen,
                   onAcceptOrder: _acceptOrder,
                   onOpenReviewOrder: _openReviewScreen,
                   onAssignOrder: _assignOrder,
-                  onMessageOrder: _messageOrder,
-                  onFollowUpOrder: _followUpOrder,
                   onScanArrival: _scanArrival,
                   onUploadEvidence: _uploadEvidence,
+                  onOpenCompletionDetails: _openCompletionDetails,
                   onSubmitCompletion: _submitCompletion,
                 ),
               if (_role == AppRole.admin && _adminOrder != null)
@@ -149,10 +154,7 @@ class _IsdpShellState extends State<IsdpShell> {
                 ),
               AccountView(
                 role: _role,
-                demoPerson: _demoPerson,
-                availablePeople: demoPeopleForRole(_role),
-                onRoleChanged: _changeRole,
-                onDemoPersonChanged: _changeDemoPerson,
+                userProfile: widget.userProfile,
                 authRepository: widget.authRepository,
               ),
             ];
@@ -222,7 +224,7 @@ class _IsdpShellState extends State<IsdpShell> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Exit app?'),
-        content: const Text('Do you want to close Commit ISDP?'),
+        content: const Text('Do you want to close PHEPHA MV ISDP?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
@@ -245,6 +247,7 @@ class _IsdpShellState extends State<IsdpShell> {
     _assigningOrder = null;
     _scanningOrder = null;
     _uploadingOrder = null;
+    _completionOrder = null;
     _reviewingOrder = null;
     _supervisorOrder = null;
     _returnToReviewQueue = false;
@@ -289,14 +292,17 @@ class _IsdpShellState extends State<IsdpShell> {
             .where(
               (order) =>
                   order.status != 'Approved' &&
-                  order.supervisor == _demoPerson.name,
+                  _matchesCurrentUser(
+                    order.supervisor,
+                    includeUnassigned: true,
+                  ),
             )
             .toList(),
       AppRole.technician =>
         orders
             .where(
               (order) =>
-                  order.assignedTo == _demoPerson.name &&
+                  _matchesCurrentUser(order.assignedTo) &&
                   (order.status == 'Dispatched' ||
                       order.status == 'On Site' ||
                       order.status == 'Submitted' ||
@@ -304,6 +310,17 @@ class _IsdpShellState extends State<IsdpShell> {
             )
             .toList(),
     };
+  }
+
+  bool _matchesCurrentUser(String? value, {bool includeUnassigned = false}) {
+    final normalized = value?.trim().toLowerCase();
+    if (normalized == null || normalized.isEmpty) return includeUnassigned;
+
+    final profile = widget.userProfile;
+    if (profile == null) return true;
+    return normalized == profile.uid.toLowerCase() ||
+        normalized == profile.name.trim().toLowerCase() ||
+        normalized == profile.email.trim().toLowerCase();
   }
 
   List<WorkOrder> _mergeWorkOrders(List<WorkOrder> repositoryOrders) {
@@ -336,6 +353,10 @@ class _IsdpShellState extends State<IsdpShell> {
         onCreated: _createJob,
         onCancel: _closeWorkflow,
       ),
+      _WorkflowView.addUser when widget.authRepository != null => AddUserScreen(
+        authRepository: widget.authRepository!,
+        onClose: _closeWorkflow,
+      ),
       _WorkflowView.assignTechnician when _assigningOrder != null =>
         AssignTechnicianScreen(
           order: _assigningOrder!,
@@ -352,6 +373,12 @@ class _IsdpShellState extends State<IsdpShell> {
           order: _uploadingOrder!,
           onCompleted: _completeUpload,
           onCancel: _cancelUpload,
+        ),
+      _WorkflowView.completionDetails when _completionOrder != null =>
+        CompletionDetailsScreen(
+          order: _completionOrder!,
+          onSaved: _saveCompletionDetails,
+          onCancel: _closeWorkflow,
         ),
       _WorkflowView.reviewJob => _buildReviewPage(visibleOrders),
       _ => null,
@@ -370,8 +397,6 @@ class _IsdpShellState extends State<IsdpShell> {
       order: order,
       onAccept: () => _acceptOrder(order),
       onAssign: () => _assignOrder(order),
-      onMessage: () => _messageOrder(order),
-      onFollowUp: () => _followUpOrder(order),
       onClose: _openSupervisorQueueScreen,
     );
   }
@@ -405,51 +430,13 @@ class _IsdpShellState extends State<IsdpShell> {
     );
   }
 
-  void _changeRole(AppRole role) {
-    setState(() {
-      _role = role;
-      _demoPerson = defaultDemoPersonForRole(role);
-      _selectedOrderId = null;
-      _workflowView = null;
-      _assigningOrder = null;
-      _scanningOrder = null;
-      _uploadingOrder = null;
-      _reviewingOrder = null;
-      _supervisorOrder = null;
-      _adminOrder = null;
-      _returnToReviewQueue = false;
-      _scanCompleter?.complete(null);
-      _scanCompleter = null;
-      _uploadCompleter?.complete(null);
-      _uploadCompleter = null;
-    });
-  }
-
-  void _changeDemoPerson(DemoPerson person) {
-    setState(() {
-      _demoPerson = person;
-      _selectedOrderId = null;
-      _workflowView = null;
-      _assigningOrder = null;
-      _scanningOrder = null;
-      _uploadingOrder = null;
-      _reviewingOrder = null;
-      _supervisorOrder = null;
-      _adminOrder = null;
-      _returnToReviewQueue = false;
-      _scanCompleter?.complete(null);
-      _scanCompleter = null;
-      _uploadCompleter?.complete(null);
-      _uploadCompleter = null;
-    });
-  }
-
   void _closeWorkflow() {
     setState(() {
       _workflowView = null;
       _assigningOrder = null;
       _scanningOrder = null;
       _uploadingOrder = null;
+      _completionOrder = null;
       _reviewingOrder = null;
       _supervisorOrder = null;
       _returnToReviewQueue = false;
@@ -484,7 +471,7 @@ class _IsdpShellState extends State<IsdpShell> {
     setState(() => _adminOrder = null);
   }
 
-  void _sendQr(WorkOrder order) {
+  Future<void> _sendQr(WorkOrder order) async {
     final pdf = pw.Document();
     pdf.addPage(
       pw.Page(
@@ -493,7 +480,7 @@ class _IsdpShellState extends State<IsdpShell> {
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
             pw.Text(
-              'Commit ISDP Job QR',
+              'PHEPHA MV ISDP Job QR',
               style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold),
             ),
             pw.SizedBox(height: 12),
@@ -519,10 +506,7 @@ class _IsdpShellState extends State<IsdpShell> {
       ),
     );
 
-    Printing.sharePdf(
-      bytes: pdf.save(),
-      filename: '${order.id}_qr.pdf',
-    );
+    Printing.sharePdf(bytes: await pdf.save(), filename: '${order.id}_qr.pdf');
   }
 
   void _replaceOrder(WorkOrder updated) {
@@ -556,6 +540,14 @@ class _IsdpShellState extends State<IsdpShell> {
       _reviewingOrder = null;
       _supervisorOrder = null;
       _returnToReviewQueue = false;
+      _tab = 0;
+    });
+  }
+
+  void _openAddUserScreen() {
+    setState(() {
+      _clearWorkflowState();
+      _workflowView = _WorkflowView.addUser;
       _tab = 0;
     });
   }
@@ -651,8 +643,14 @@ class _IsdpShellState extends State<IsdpShell> {
   }
 
   Future<void> _acceptOrder(WorkOrder order) async {
-    final accepted = order.copyWith(status: 'Accepted by Supervisor');
-    await _repository.acceptWorkOrder(order);
+    final supervisor = widget.userProfile?.email.isNotEmpty == true
+        ? widget.userProfile!.email
+        : widget.userProfile?.name ?? order.supervisor;
+    final accepted = order.copyWith(
+      status: 'Accepted by Supervisor',
+      supervisor: supervisor,
+    );
+    await _repository.acceptWorkOrder(accepted);
     _replaceOrder(accepted);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -791,16 +789,25 @@ class _IsdpShellState extends State<IsdpShell> {
     return completer.future;
   }
 
-  void _completeUpload(List<String> evidenceSlots) async {
+  void _completeUpload(
+    List<String> evidenceSlots,
+    Map<String, String> evidencePhotos,
+  ) async {
     final order = _uploadingOrder;
     if (order != null) {
       final uploaded = const ['before', 'after'].every(evidenceSlots.contains);
+      final mergedPhotos = {...order.evidencePhotos, ...evidencePhotos};
       final updated = order.copyWith(
         evidenceSlots: evidenceSlots,
+        evidencePhotos: mergedPhotos,
         evidenceUploaded: uploaded,
       );
       try {
-        await _repository.saveEvidence(order, evidenceSlots);
+        await _repository.saveEvidence(
+          order,
+          evidenceSlots,
+          evidencePhotos: evidencePhotos,
+        );
       } catch (_) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -811,7 +818,6 @@ class _IsdpShellState extends State<IsdpShell> {
       if (!mounted) return;
       _replaceOrder(updated);
     }
-
     final completer = _uploadCompleter;
     if (completer != null && !completer.isCompleted) {
       completer.complete(evidenceSlots);
@@ -835,30 +841,218 @@ class _IsdpShellState extends State<IsdpShell> {
     });
   }
 
-  void _messageOrder(WorkOrder order) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('Message sent for ${order.id}.')));
-  }
-
-  void _followUpOrder(WorkOrder order) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Follow-up logged for ${order.id}.')),
-    );
-  }
-
   Future<void> _submitCompletion(WorkOrder order) async {
+    if (order.technicianNotes?.trim().isEmpty != false ||
+        order.customerName?.trim().isEmpty != false ||
+        order.customerSignature?.isEmpty != false) {
+      _openCompletionDetails(order);
+      return;
+    }
     final complete = order.copyWith(
       status: 'Submitted',
       sla: 'Ready for approval',
       evidenceUploaded: true,
       reviewed: false,
+      submittedAt: DateTime.now(),
     );
-    await _repository.submitCompletion(order);
+    unawaited(_repository.submitCompletion(complete));
     _replaceOrder(complete);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('${order.id} submitted for Admin approval.')),
+    );
+  }
+
+  void _observeOrderNotifications(List<WorkOrder> orders) {
+    final current = {for (final order in orders) order.id: order};
+    if (!_notificationsInitialized) {
+      _knownOrders
+        ..clear()
+        ..addAll(current);
+      _notificationsInitialized = true;
+      return;
+    }
+
+    final updates = <_AppNotification>[];
+    for (final order in orders) {
+      final previous = _knownOrders[order.id];
+      if (previous == null) {
+        updates.add(
+          _AppNotification(
+            orderId: order.id,
+            title: 'New work order',
+            message: '${order.site} has been added to your queue.',
+            createdAt: DateTime.now(),
+            type: _NotificationType.assignment,
+          ),
+        );
+      } else if (previous.issueReport != order.issueReport &&
+          order.issueReport?.trim().isNotEmpty == true) {
+        updates.add(
+          _AppNotification(
+            orderId: order.id,
+            title: 'Issue reported',
+            message: '${order.site}: ${order.issueReport!.trim()}',
+            createdAt: DateTime.now(),
+            type: _NotificationType.issue,
+          ),
+        );
+      } else if (previous.status != order.status) {
+        updates.add(_statusNotification(order));
+      } else if (previous.customerSignature != order.customerSignature &&
+          order.customerSignature?.isNotEmpty == true) {
+        updates.add(
+          _AppNotification(
+            orderId: order.id,
+            title: 'Customer sign-off captured',
+            message: '${order.site} completion details are ready.',
+            createdAt: DateTime.now(),
+            type: _NotificationType.success,
+          ),
+        );
+      }
+    }
+    _knownOrders
+      ..clear()
+      ..addAll(current);
+    if (updates.isEmpty) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() {
+        _notifications.insertAll(0, updates);
+        if (_notifications.length > 30) {
+          _notifications.removeRange(30, _notifications.length);
+        }
+      });
+    });
+  }
+
+  Future<void> _showNotifications() async {
+    final unreadNotifications = _notifications
+        .where((item) => !item.read)
+        .toList();
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.sizeOf(context).height * 0.72,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 12, 12),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Activity Centre',
+                            style: TextStyle(
+                              fontSize: 21,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          Text(
+                            'Unread job updates and required actions',
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (unreadNotifications.isNotEmpty)
+                      TextButton(
+                        onPressed: () {
+                          setState(() {
+                            for (final item in _notifications) {
+                              item.read = true;
+                            }
+                          });
+                          Navigator.pop(context);
+                          _showNotifications();
+                        },
+                        child: const Text('Mark all read'),
+                      ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: unreadNotifications.isEmpty
+                    ? const _NotificationEmptyState()
+                    : ListView.builder(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        itemCount: unreadNotifications.length,
+                        itemBuilder: (context, index) {
+                          final item = unreadNotifications[index];
+                          return _NotificationCard(
+                            notification: item,
+                            onTap: () {
+                              setState(() => item.read = true);
+                              Navigator.pop(context);
+                              final order = _knownOrders[item.orderId];
+                              if (order != null) _openOrder(order);
+                            },
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  _AppNotification _statusNotification(WorkOrder order) {
+    final type = switch (order.status) {
+      'Approved' => _NotificationType.success,
+      'Submitted' => _NotificationType.action,
+      'Dispatched' || 'On Site' => _NotificationType.progress,
+      _ => _NotificationType.info,
+    };
+    final title = switch (order.status) {
+      'Approved' => 'Job approved',
+      'Submitted' => 'Job submitted',
+      'Dispatched' => 'Technician dispatched',
+      'On Site' => 'Arrival confirmed',
+      _ => 'Job status updated',
+    };
+    return _AppNotification(
+      orderId: order.id,
+      title: title,
+      message: '${order.site} is now ${order.status.toLowerCase()}.',
+      createdAt: DateTime.now(),
+      type: type,
+    );
+  }
+
+  void _openCompletionDetails(WorkOrder order) {
+    setState(() {
+      _workflowView = _WorkflowView.completionDetails;
+      _completionOrder = order;
+      _assigningOrder = null;
+      _scanningOrder = null;
+      _uploadingOrder = null;
+      _reviewingOrder = null;
+      _supervisorOrder = null;
+      _tab = 0;
+    });
+  }
+
+  void _saveCompletionDetails(WorkOrder updated) {
+    unawaited(_repository.saveCompletionDetails(updated));
+    _replaceOrder(updated);
+    _closeWorkflow();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Completion details saved. They will sync automatically if offline.',
+        ),
+      ),
     );
   }
 
@@ -871,5 +1065,252 @@ class _IsdpShellState extends State<IsdpShell> {
     } else {
       _closeWorkflow();
     }
+  }
+}
+
+class _AppBarBrandTitle extends StatelessWidget {
+  const _AppBarBrandTitle();
+
+  @override
+  Widget build(BuildContext context) {
+    return Text.rich(
+      const TextSpan(
+        children: [
+          TextSpan(text: 'PHEPHA MV '),
+          TextSpan(
+            text: 'ISDP',
+            style: TextStyle(color: Colors.red, fontWeight: FontWeight.w900),
+          ),
+        ],
+      ),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+}
+
+class _SyncStatusButton extends StatelessWidget {
+  const _SyncStatusButton({required this.status});
+
+  final SyncStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, label, color) = switch (status) {
+      SyncStatus.online => (Icons.cloud_done_outlined, 'Synced', Colors.green),
+      SyncStatus.syncing => (
+        Icons.cloud_sync_outlined,
+        'Syncing',
+        Colors.orange,
+      ),
+      SyncStatus.offline => (Icons.cloud_off_outlined, 'Offline', Colors.red),
+    };
+    return Tooltip(
+      message: status == SyncStatus.offline
+          ? 'Offline changes are saved on this device and will sync automatically.'
+          : label,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Chip(
+          avatar: Icon(icon, size: 17, color: color),
+          label: Text(label),
+          visualDensity: VisualDensity.compact,
+          side: BorderSide(color: color.withValues(alpha: 0.25)),
+        ),
+      ),
+    );
+  }
+}
+
+class _NotificationButton extends StatelessWidget {
+  const _NotificationButton({required this.count, required this.onPressed});
+
+  final int count;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: 'Notifications',
+      onPressed: onPressed,
+      icon: Badge(
+        isLabelVisible: count > 0,
+        label: Text(count > 9 ? '9+' : '$count'),
+        child: const Icon(Icons.notifications_outlined),
+      ),
+    );
+  }
+}
+
+enum _NotificationType { assignment, action, issue, progress, success, info }
+
+class _AppNotification {
+  _AppNotification({
+    required this.orderId,
+    required this.title,
+    required this.message,
+    required this.createdAt,
+    required this.type,
+  });
+
+  final String orderId;
+  final String title;
+  final String message;
+  final DateTime createdAt;
+  final _NotificationType type;
+  bool read = false;
+}
+
+String _notificationTime(DateTime value) {
+  final elapsed = DateTime.now().difference(value);
+  if (elapsed.inMinutes < 1) return 'Now';
+  if (elapsed.inHours < 1) return '${elapsed.inMinutes}m ago';
+  if (elapsed.inDays < 1) return '${elapsed.inHours}h ago';
+  if (elapsed.inDays < 7) return '${elapsed.inDays}d ago';
+  final hour = value.hour.toString().padLeft(2, '0');
+  final minute = value.minute.toString().padLeft(2, '0');
+  return '$hour:$minute';
+}
+
+class _NotificationCard extends StatelessWidget {
+  const _NotificationCard({required this.notification, required this.onTap});
+
+  final _AppNotification notification;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, color, category) = switch (notification.type) {
+      _NotificationType.assignment => (
+        Icons.assignment_ind_outlined,
+        Colors.blue,
+        'Assignment',
+      ),
+      _NotificationType.action => (
+        Icons.pending_actions_outlined,
+        Colors.orange,
+        'Action required',
+      ),
+      _NotificationType.issue => (
+        Icons.report_problem_outlined,
+        Colors.red,
+        'Attention',
+      ),
+      _NotificationType.progress => (
+        Icons.route_outlined,
+        Colors.teal,
+        'Progress',
+      ),
+      _NotificationType.success => (
+        Icons.check_circle_outline,
+        Colors.green,
+        'Completed',
+      ),
+      _NotificationType.info => (Icons.info_outline, Colors.blueGrey, 'Update'),
+    };
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+      decoration: BoxDecoration(
+        color: notification.read
+            ? Colors.transparent
+            : color.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: notification.read
+              ? Colors.grey.withValues(alpha: 0.18)
+              : color.withValues(alpha: 0.24),
+        ),
+      ),
+      child: ListTile(
+        onTap: onTap,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        leading: CircleAvatar(
+          backgroundColor: color.withValues(alpha: 0.12),
+          foregroundColor: color,
+          child: Icon(icon),
+        ),
+        title: Row(
+          children: [
+            Expanded(
+              child: Text(
+                notification.title,
+                style: TextStyle(
+                  fontWeight: notification.read
+                      ? FontWeight.w700
+                      : FontWeight.w900,
+                ),
+              ),
+            ),
+            if (!notification.read)
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
+          ],
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 5),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(notification.message),
+              const SizedBox(height: 7),
+              Wrap(
+                spacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Text(
+                    category.toUpperCase(),
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  Text(
+                    notification.orderId,
+                    style: const TextStyle(fontSize: 11, color: Colors.grey),
+                  ),
+                  Text(
+                    _notificationTime(notification.createdAt),
+                    style: const TextStyle(fontSize: 11, color: Colors.grey),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        trailing: const Icon(Icons.chevron_right),
+      ),
+    );
+  }
+}
+
+class _NotificationEmptyState extends StatelessWidget {
+  const _NotificationEmptyState();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.notifications_none_outlined, size: 52, color: Colors.grey),
+          SizedBox(height: 12),
+          Text(
+            'You are up to date',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
+          ),
+          SizedBox(height: 4),
+          Text(
+            'There are no unread notifications.',
+            style: TextStyle(color: Colors.grey),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
   }
 }

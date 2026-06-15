@@ -1,7 +1,10 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../domain/entities.dart';
+import 'widgets/evidence_photo_thumbnail.dart';
 import 'widgets/form_scaffold.dart';
 
 class UploadEvidenceScreen extends StatefulWidget {
@@ -13,7 +16,7 @@ class UploadEvidenceScreen extends StatefulWidget {
   });
 
   final WorkOrder order;
-  final ValueChanged<List<String>>? onCompleted;
+  final void Function(List<String>, Map<String, String>)? onCompleted;
   final VoidCallback? onCancel;
 
   @override
@@ -21,7 +24,10 @@ class UploadEvidenceScreen extends StatefulWidget {
 }
 
 class _UploadEvidenceScreenState extends State<UploadEvidenceScreen> {
+  static const _maxPhotoBytes = 300000;
   final Set<String> _uploadedSlots = {};
+  final Map<String, String> _photoDataBySlot = {};
+  final ImagePicker _picker = ImagePicker();
 
   static const _slots = [
     _PhotoSlot(
@@ -45,6 +51,7 @@ class _UploadEvidenceScreenState extends State<UploadEvidenceScreen> {
   void initState() {
     super.initState();
     _uploadedSlots.addAll(widget.order.evidenceSlots);
+    _photoDataBySlot.addAll(widget.order.evidencePhotos);
   }
 
   @override
@@ -89,11 +96,6 @@ class _UploadEvidenceScreenState extends State<UploadEvidenceScreen> {
                                 ),
                               ),
                             ),
-                            TextButton.icon(
-                              onPressed: _uploadAll,
-                              icon: const Icon(Icons.auto_awesome_outlined),
-                              label: const Text('Demo Fill'),
-                            ),
                           ],
                         ),
                       ),
@@ -103,7 +105,8 @@ class _UploadEvidenceScreenState extends State<UploadEvidenceScreen> {
                       (slot) => _PhotoUploadTile(
                         slot: slot,
                         uploaded: _uploadedSlots.contains(slot.keyName),
-                        onUpload: () => _upload(slot.keyName),
+                        photoData: _photoDataBySlot[slot.keyName],
+                        onUpload: () => _pickPhoto(slot.keyName),
                       ),
                     ),
                   ],
@@ -122,15 +125,61 @@ class _UploadEvidenceScreenState extends State<UploadEvidenceScreen> {
     );
   }
 
-  void _upload(String slot) {
-    setState(() => _uploadedSlots.add(slot));
+  Future<void> _pickPhoto(String slot) async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Take photo'),
+              onTap: () => Navigator.pop(context, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Choose from gallery'),
+              onTap: () => Navigator.pop(context, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+
+    final image = await _picker.pickImage(
+      source: source,
+      maxWidth: 1024,
+      maxHeight: 1024,
+      imageQuality: 60,
+    );
+    if (image == null) return;
+
+    final bytes = await image.readAsBytes();
+    if (bytes.length > _maxPhotoBytes) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This photo is too large. Choose a smaller image or use the camera.',
+          ),
+        ),
+      );
+      return;
+    }
+    final mimeType = image.mimeType ?? 'image/jpeg';
+    final photoData = 'data:$mimeType;base64,${base64Encode(bytes)}';
+    if (!mounted) return;
+
+    setState(() {
+      _uploadedSlots.add(slot);
+      _photoDataBySlot[slot] = photoData;
+    });
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(const SnackBar(content: Text('Demo image uploaded.')));
-  }
-
-  void _uploadAll() {
-    setState(() => _uploadedSlots.addAll(_slots.map((slot) => slot.keyName)));
+    ).showSnackBar(const SnackBar(content: Text('Photo added.')));
   }
 
   void _showMissing() {
@@ -143,7 +192,7 @@ class _UploadEvidenceScreenState extends State<UploadEvidenceScreen> {
     final onCompleted = widget.onCompleted;
     final slots = _orderedUploadedSlots();
     if (onCompleted != null) {
-      onCompleted(slots);
+      onCompleted(slots, Map.unmodifiable(_photoDataBySlot));
     } else {
       Navigator.pop(context, slots);
     }
@@ -175,11 +224,13 @@ class _PhotoUploadTile extends StatelessWidget {
   const _PhotoUploadTile({
     required this.slot,
     required this.uploaded,
+    required this.photoData,
     required this.onUpload,
   });
 
   final _PhotoSlot slot;
   final bool uploaded;
+  final String? photoData;
   final VoidCallback onUpload;
 
   @override
@@ -196,17 +247,28 @@ class _PhotoUploadTile extends StatelessWidget {
               color: color.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(uploaded ? Icons.image : slot.icon, color: color),
+            clipBehavior: Clip.antiAlias,
+            child: photoData != null
+                ? EvidencePhotoThumbnail(
+                    photoData: photoData,
+                    complete: uploaded,
+                    size: 46,
+                  )
+                : Icon(uploaded ? Icons.image : slot.icon, color: color),
           ),
           title: Text(
             slot.title,
             style: const TextStyle(fontWeight: FontWeight.w900),
           ),
           subtitle: Text(
-            uploaded ? 'Uploaded: ${slot.keyName}_demo.jpg' : slot.detail,
+            uploaded ? 'Uploaded: ${slot.keyName}_photo.jpg' : slot.detail,
           ),
           trailing: uploaded
-              ? const Icon(Icons.check_circle, color: AppTheme.success)
+              ? IconButton.filledTonal(
+                  tooltip: 'Replace photo',
+                  onPressed: onUpload,
+                  icon: const Icon(Icons.swap_horiz),
+                )
               : FilledButton.icon(
                   onPressed: onUpload,
                   icon: const Icon(Icons.add_a_photo_outlined),

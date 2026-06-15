@@ -1,9 +1,13 @@
 import 'entities.dart';
 
+enum SyncStatus { online, syncing, offline }
+
 abstract class IsdpRepository {
   List<WorkOrder> getWorkOrders();
 
   Stream<List<WorkOrder>> watchWorkOrders();
+
+  Stream<SyncStatus> watchSyncStatus();
 
   List<Metric> getDashboardMetrics();
 
@@ -19,7 +23,13 @@ abstract class IsdpRepository {
 
   Future<void> markOnsite(WorkOrder order);
 
-  Future<void> saveEvidence(WorkOrder order, List<String> evidenceSlots);
+  Future<void> saveEvidence(
+    WorkOrder order,
+    List<String> evidenceSlots, {
+    Map<String, String> evidencePhotos = const {},
+  });
+
+  Future<void> saveCompletionDetails(WorkOrder order);
 
   Future<void> submitCompletion(WorkOrder order);
 

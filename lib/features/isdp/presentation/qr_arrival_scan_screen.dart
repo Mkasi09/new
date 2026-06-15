@@ -145,10 +145,10 @@ class _QrArrivalScanScreenState extends State<QrArrivalScanScreen> {
                             label: const Text('Proceed'),
                           )
                         else
-                          FilledButton.icon(
-                            onPressed: _showMatched,
-                            icon: const Icon(Icons.verified_outlined),
-                            label: const Text('Demo Verify'),
+                          const Text(
+                            'Point the camera at the QR code displayed at this site.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontWeight: FontWeight.w700),
                           ),
                       ],
                     ),

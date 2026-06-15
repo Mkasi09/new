@@ -36,6 +36,18 @@ class FirebaseIsdpRepository implements IsdpRepository {
   }
 
   @override
+  Stream<SyncStatus> watchSyncStatus() {
+    return _workOrders.snapshots(includeMetadataChanges: true).map((snapshot) {
+      if (snapshot.docs.any((doc) => doc.metadata.hasPendingWrites)) {
+        return SyncStatus.syncing;
+      }
+      return snapshot.metadata.isFromCache
+          ? SyncStatus.offline
+          : SyncStatus.online;
+    }).distinct();
+  }
+
+  @override
   List<Metric> getDashboardMetrics() => dashboardMetrics;
 
   @override
@@ -62,7 +74,14 @@ class FirebaseIsdpRepository implements IsdpRepository {
 
   @override
   Future<void> acceptWorkOrder(WorkOrder order) {
-    return _updateStatus(order, 'Accepted by Supervisor');
+    return _workOrders.doc(order.id).update({
+      'status': 'Accepted by Supervisor',
+      if (order.supervisor != null) 'supervisor': order.supervisor,
+      'updatedAt': FieldValue.serverTimestamp(),
+      'history': FieldValue.arrayUnion([
+        _historyEntry('accepted by supervisor'),
+      ]),
+    });
   }
 
   @override
@@ -87,13 +106,33 @@ class FirebaseIsdpRepository implements IsdpRepository {
   }
 
   @override
-  Future<void> saveEvidence(WorkOrder order, List<String> evidenceSlots) {
+  Future<void> saveEvidence(
+    WorkOrder order,
+    List<String> evidenceSlots, {
+    Map<String, String> evidencePhotos = const {},
+  }) {
     final normalizedSlots = evidenceSlots.toSet().toList()..sort();
+    final photos = {...order.evidencePhotos, ...evidencePhotos};
     return _workOrders.doc(order.id).update({
       'evidenceSlots': normalizedSlots,
+      'evidencePhotos': photos,
       'evidenceUploaded': normalizedSlots.length >= 2,
       'updatedAt': FieldValue.serverTimestamp(),
       'history': FieldValue.arrayUnion([_historyEntry('evidence uploaded')]),
+    });
+  }
+
+  @override
+  Future<void> saveCompletionDetails(WorkOrder order) {
+    return _workOrders.doc(order.id).update({
+      'technicianNotes': order.technicianNotes,
+      'issueReport': order.issueReport,
+      'customerName': order.customerName,
+      'customerSignature': order.customerSignature,
+      'updatedAt': FieldValue.serverTimestamp(),
+      'history': FieldValue.arrayUnion([
+        _historyEntry('completion details saved'),
+      ]),
     });
   }
 
@@ -104,6 +143,12 @@ class FirebaseIsdpRepository implements IsdpRepository {
       'sla': 'Ready for approval',
       'evidenceUploaded': true,
       'evidenceSlots': order.evidenceSlots,
+      'evidencePhotos': order.evidencePhotos,
+      'technicianNotes': order.technicianNotes,
+      'issueReport': order.issueReport,
+      'customerName': order.customerName,
+      'customerSignature': order.customerSignature,
+      'submittedAt': FieldValue.serverTimestamp(),
       'reviewed': false,
       'reviewedAt': null,
       'updatedAt': FieldValue.serverTimestamp(),

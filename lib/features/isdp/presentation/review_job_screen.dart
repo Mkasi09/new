@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../domain/entities.dart';
 import 'widgets/common.dart';
+import 'widgets/evidence_photo_thumbnail.dart';
 
 class ReviewJobScreen extends StatelessWidget {
   const ReviewJobScreen({
@@ -41,43 +41,9 @@ class ReviewJobScreen extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 12),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  order.site,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  order.address,
-                  style: const TextStyle(color: AppTheme.muted),
-                ),
-                const SizedBox(height: 12),
-                Text(order.scope),
-                const SizedBox(height: 14),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    InfoChip(icon: Icons.badge_outlined, label: order.id),
-                    InfoChip(
-                      icon: Icons.person_outline,
-                      label: order.assignedTo ?? 'No technician',
-                    ),
-                    InfoChip(icon: Icons.schedule_outlined, label: order.sla),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
+        JobOverviewPanel(order: order),
+        const SizedBox(height: 14),
+        WorkDurationPanel(order: order),
         const SizedBox(height: 14),
         const SectionTitle('Evidence'),
         const SizedBox(height: 10),
@@ -85,11 +51,13 @@ class ReviewJobScreen extends StatelessWidget {
           title: 'Before photo',
           detail: 'Photo captured before work started.',
           complete: hasBefore,
+          photoData: order.evidencePhotos['before'],
         ),
         _EvidenceReviewCard(
           title: 'After photo',
           detail: 'Photo captured after work was completed.',
           complete: hasAfter,
+          photoData: order.evidencePhotos['after'],
         ),
         if (!evidenceReady) ...[
           const SizedBox(height: 4),
@@ -101,30 +69,6 @@ class ReviewJobScreen extends StatelessWidget {
             ),
           ),
         ],
-        const SizedBox(height: 14),
-        const SectionTitle('QR Test Value'),
-        const SizedBox(height: 10),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              children: [
-                Expanded(child: SelectableText(order.siteCode)),
-                const SizedBox(width: 10),
-                IconButton.filledTonal(
-                  tooltip: 'Copy QR value',
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(text: order.siteCode));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('QR test value copied.')),
-                    );
-                  },
-                  icon: const Icon(Icons.copy),
-                ),
-              ],
-            ),
-          ),
-        ),
         const SizedBox(height: 18),
         FilledButton.icon(
           onPressed: evidenceReady ? onApprove : null,
@@ -141,11 +85,13 @@ class _EvidenceReviewCard extends StatelessWidget {
     required this.title,
     required this.detail,
     required this.complete,
+    required this.photoData,
   });
 
   final String title;
   final String detail;
   final bool complete;
+  final String? photoData;
 
   @override
   Widget build(BuildContext context) {
@@ -156,12 +102,13 @@ class _EvidenceReviewCard extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              IconPill(
-                icon: complete
-                    ? Icons.check_circle_outline
-                    : Icons.image_not_supported_outlined,
-                color: color,
+              EvidencePhotoViewer(
+                photoData: photoData,
+                complete: complete,
+                title: title,
+                size: 92,
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -174,10 +121,17 @@ class _EvidenceReviewCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 3),
                     Text(detail, style: const TextStyle(color: AppTheme.muted)),
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: StatusChip(
+                        label: complete ? 'Photo visible' : 'Missing',
+                        color: color,
+                      ),
+                    ),
                   ],
                 ),
               ),
-              StatusChip(label: complete ? 'Saved' : 'Missing', color: color),
             ],
           ),
         ),

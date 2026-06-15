@@ -2,24 +2,17 @@ import 'package:flutter/material.dart';
 
 import '../../../core/domain/app_role.dart';
 import '../../auth/domain/auth_repository.dart';
-import '../data/demo_people.dart';
 
 class AccountView extends StatelessWidget {
   const AccountView({
     super.key,
     required this.role,
-    required this.demoPerson,
-    required this.availablePeople,
-    required this.onRoleChanged,
-    required this.onDemoPersonChanged,
+    this.userProfile,
     this.authRepository,
   });
 
   final AppRole role;
-  final DemoPerson demoPerson;
-  final List<DemoPerson> availablePeople;
-  final ValueChanged<AppRole> onRoleChanged;
-  final ValueChanged<DemoPerson> onDemoPersonChanged;
+  final AppUserProfile? userProfile;
   final AuthRepository? authRepository;
 
   @override
@@ -42,16 +35,25 @@ class AccountView extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              'Commit ISDP',
-                              style: TextStyle(
+                            Text.rich(
+                              const TextSpan(
+                                children: [
+                                  TextSpan(text: 'PHEPHA MV '),
+                                  TextSpan(
+                                    text: 'ISDP',
+                                    style: TextStyle(color: Colors.red),
+                                  ),
+                                ],
+                              ),
+                              style: const TextStyle(
+                                color: Colors.black,
                                 fontWeight: FontWeight.w900,
                                 fontSize: 18,
                               ),
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              'Signed in as ${demoPerson.name} - ${role.label}',
+                              'Signed in as ${userProfile?.name ?? role.label}',
                               style: const TextStyle(color: Colors.grey),
                             ),
                           ],
@@ -65,71 +67,27 @@ class AccountView extends StatelessWidget {
               Card(
                 child: Column(
                   children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'Demo Role',
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w900),
-                        ),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                      child: DropdownButtonFormField<AppRole>(
-                        initialValue: role,
-                        decoration: const InputDecoration(
-                          prefixIcon: Icon(Icons.badge_outlined),
-                          labelText: 'Current role',
-                        ),
-                        items: AppRole.values
-                            .map(
-                              (role) => DropdownMenuItem(
-                                value: role,
-                                child: Text(role.label),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (value) {
-                          if (value != null) onRoleChanged(value);
-                        },
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                      child: DropdownButtonFormField<DemoPerson>(
-                        initialValue: demoPerson,
-                        decoration: const InputDecoration(
-                          prefixIcon: Icon(Icons.person_search_outlined),
-                          labelText: 'Demo user',
-                        ),
-                        items: availablePeople
-                            .map(
-                              (person) => DropdownMenuItem(
-                                value: person,
-                                child: Text(person.name),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (value) {
-                          if (value != null) onDemoPersonChanged(value);
-                        },
-                      ),
-                    ),
-                    const Divider(height: 1),
                     _AccountTile(
                       Icons.person_pin_circle_outlined,
                       'User',
-                      demoPerson.name,
+                      userProfile?.name ?? 'Signed-in user',
                     ),
                     const Divider(height: 1),
                     _AccountTile(
-                      Icons.groups_outlined,
-                      'Team',
-                      demoPerson.team,
+                      Icons.email_outlined,
+                      'Email',
+                      userProfile?.email.isNotEmpty == true
+                          ? userProfile!.email
+                          : 'Not available',
                     ),
+                    if (userProfile?.team?.isNotEmpty == true) ...[
+                      const Divider(height: 1),
+                      _AccountTile(
+                        Icons.groups_outlined,
+                        'Team',
+                        userProfile!.team!,
+                      ),
+                    ],
                     const Divider(height: 1),
                     _AccountTile(Icons.security_outlined, 'Role', role.label),
                     const Divider(height: 1),

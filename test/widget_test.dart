@@ -1,17 +1,55 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:isdp/app/isdp_app.dart';
 import 'package:isdp/core/domain/app_role.dart';
 import 'package:isdp/features/isdp/domain/entities.dart';
 import 'package:isdp/features/isdp/domain/isdp_repository.dart';
 import 'package:isdp/features/isdp/presentation/isdp_shell.dart';
+import 'package:isdp/features/isdp/presentation/completion_details_screen.dart';
 
 void main() {
+  test('customer signature can be stored and restored', () {
+    final encoded = encodeSignature([
+      const [Offset(0.1, 0.2), Offset(0.8, 0.7)],
+    ]);
+
+    expect(decodeSignature(encoded), const [
+      [Offset(0.1, 0.2), Offset(0.8, 0.7)],
+    ]);
+  });
+
+  testWidgets('full-screen signature paints while drawing', (tester) async {
+    await tester.pumpWidget(
+      const IsdpApp(
+        home: FullScreenSignatureScreen(
+          initialStrokes: [],
+          customerName: 'Customer',
+        ),
+      ),
+    );
+
+    expect(find.text('SIGN HERE'), findsOneWidget);
+    expect(find.text('Use this signature'), findsOneWidget);
+
+    final start = tester.getCenter(find.text('SIGN HERE'));
+    final gesture = await tester.startGesture(start);
+    await gesture.moveBy(const Offset(160, 40));
+    await tester.pump();
+
+    expect(find.text('SIGN HERE'), findsNothing);
+    final button = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Use this signature'),
+    );
+    expect(button.onPressed, isNotNull);
+    await gesture.up();
+  });
+
   testWidgets('technician sees on-site workflow', (tester) async {
     await tester.pumpWidget(
       IsdpApp(home: IsdpShell(isdpRepository: _TestIsdpRepository())),
     );
 
-    expect(find.text('Commit ISDP'), findsOneWidget);
+    expect(find.text('PHEPHA MV ISDP'), findsOneWidget);
     expect(find.text('Today'), findsWidgets);
     expect(find.text('Next Steps'), findsOneWidget);
     expect(find.textContaining('Time left'), findsOneWidget);
@@ -107,6 +145,9 @@ class _TestIsdpRepository implements IsdpRepository {
   Stream<List<WorkOrder>> watchWorkOrders() => Stream.value(_jobs);
 
   @override
+  Stream<SyncStatus> watchSyncStatus() => Stream.value(SyncStatus.online);
+
+  @override
   List<Metric> getDashboardMetrics() => const [];
 
   @override
@@ -133,8 +174,12 @@ class _TestIsdpRepository implements IsdpRepository {
   @override
   Future<void> saveEvidence(
     WorkOrder order,
-    List<String> evidenceSlots,
-  ) async {}
+    List<String> evidenceSlots, {
+    Map<String, String> evidencePhotos = const {},
+  }) async {}
+
+  @override
+  Future<void> saveCompletionDetails(WorkOrder order) async {}
 
   @override
   Future<void> submitCompletion(WorkOrder order) async {}

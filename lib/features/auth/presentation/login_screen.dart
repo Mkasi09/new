@@ -1,6 +1,8 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/animated_logo_loader.dart';
+
 import '../../../app/theme/app_theme.dart';
 import '../domain/auth_repository.dart';
 
@@ -129,12 +131,24 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ],
           ),
-          child: Image.asset('assets/logo.png'),
+          child: Image.asset('assets/logo1.png'),
         ),
         const SizedBox(height: 18),
-        const Text(
-          'Commit ISDP',
-          style: TextStyle(fontSize: 27, fontWeight: FontWeight.w900),
+        Text.rich(
+          const TextSpan(
+            children: [
+              TextSpan(text: 'PHEPHA MV '),
+              TextSpan(
+                text: 'ISDP',
+                style: TextStyle(color: Colors.red),
+              ),
+            ],
+          ),
+          style: const TextStyle(
+            color: AppTheme.ink,
+            fontSize: 27,
+            fontWeight: FontWeight.w900,
+          ),
         ),
         const SizedBox(height: 6),
         const Text(
@@ -203,11 +217,7 @@ class _LoginScreenState extends State<LoginScreen> {
               FilledButton.icon(
                 onPressed: _isLoading ? null : _signIn,
                 icon: _isLoading
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
+                    ? const AnimatedLogoLoader(size: 24, compact: true)
                     : const Icon(Icons.login),
                 label: Text(_isLoading ? 'Signing In' : 'Sign In'),
               ),

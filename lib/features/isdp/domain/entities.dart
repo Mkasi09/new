@@ -33,9 +33,15 @@ class WorkOrder {
     required this.priority,
     this.dueAt,
     this.arrivedAt,
+    this.submittedAt,
     this.arrivalVerified = false,
     this.evidenceUploaded = false,
     this.evidenceSlots = const [],
+    this.evidencePhotos = const {},
+    this.technicianNotes,
+    this.issueReport,
+    this.customerName,
+    this.customerSignature,
     this.reviewed = false,
     this.reviewedAt,
     this.supervisor,
@@ -53,9 +59,15 @@ class WorkOrder {
   final Priority priority;
   final DateTime? dueAt;
   final DateTime? arrivedAt;
+  final DateTime? submittedAt;
   final bool arrivalVerified;
   final bool evidenceUploaded;
   final List<String> evidenceSlots;
+  final Map<String, String> evidencePhotos;
+  final String? technicianNotes;
+  final String? issueReport;
+  final String? customerName;
+  final String? customerSignature;
   final bool reviewed;
   final DateTime? reviewedAt;
   final String? supervisor;
@@ -73,9 +85,15 @@ class WorkOrder {
     Priority? priority,
     DateTime? dueAt,
     DateTime? arrivedAt,
+    DateTime? submittedAt,
     bool? arrivalVerified,
     bool? evidenceUploaded,
     List<String>? evidenceSlots,
+    Map<String, String>? evidencePhotos,
+    String? technicianNotes,
+    String? issueReport,
+    String? customerName,
+    String? customerSignature,
     bool? reviewed,
     DateTime? reviewedAt,
     String? supervisor,
@@ -93,9 +111,15 @@ class WorkOrder {
       priority: priority ?? this.priority,
       dueAt: dueAt ?? this.dueAt,
       arrivedAt: arrivedAt ?? this.arrivedAt,
+      submittedAt: submittedAt ?? this.submittedAt,
       arrivalVerified: arrivalVerified ?? this.arrivalVerified,
       evidenceUploaded: evidenceUploaded ?? this.evidenceUploaded,
       evidenceSlots: evidenceSlots ?? this.evidenceSlots,
+      evidencePhotos: evidencePhotos ?? this.evidencePhotos,
+      technicianNotes: technicianNotes ?? this.technicianNotes,
+      issueReport: issueReport ?? this.issueReport,
+      customerName: customerName ?? this.customerName,
+      customerSignature: customerSignature ?? this.customerSignature,
       reviewed: reviewed ?? this.reviewed,
       reviewedAt: reviewedAt ?? this.reviewedAt,
       supervisor: supervisor ?? this.supervisor,
@@ -115,9 +139,15 @@ class WorkOrder {
       'priority': priority.name,
       'dueAt': dueAt?.toIso8601String(),
       'arrivedAt': arrivedAt?.toIso8601String(),
+      'submittedAt': submittedAt?.toIso8601String(),
       'arrivalVerified': arrivalVerified,
       'evidenceUploaded': evidenceUploaded,
       'evidenceSlots': evidenceSlots,
+      'evidencePhotos': evidencePhotos,
+      'technicianNotes': technicianNotes,
+      'issueReport': issueReport,
+      'customerName': customerName,
+      'customerSignature': customerSignature,
       'reviewed': reviewed,
       'reviewedAt': reviewedAt?.toIso8601String(),
       'supervisor': supervisor,
@@ -140,6 +170,7 @@ class WorkOrder {
           _dateTimeFromMapValue(map['dueAt']) ??
           _dueAtFromFriendlyText(map['sla'] as String?),
       arrivedAt: _dateTimeFromMapValue(map['arrivedAt']),
+      submittedAt: _dateTimeFromMapValue(map['submittedAt']),
       arrivalVerified: map['arrivalVerified'] as bool? ?? false,
       evidenceUploaded: map['evidenceUploaded'] as bool? ?? false,
       evidenceSlots:
@@ -147,6 +178,15 @@ class WorkOrder {
               ?.whereType<String>()
               .toList() ??
           const [],
+      evidencePhotos:
+          (map['evidencePhotos'] as Map<String, dynamic>?)?.map(
+            (key, value) => MapEntry(key, value.toString()),
+          ) ??
+          const {},
+      technicianNotes: map['technicianNotes'] as String?,
+      issueReport: map['issueReport'] as String?,
+      customerName: map['customerName'] as String?,
+      customerSignature: map['customerSignature'] as String?,
       reviewed: map['reviewed'] as bool? ?? false,
       reviewedAt: _dateTimeFromMapValue(map['reviewedAt']),
       supervisor: map['supervisor'] as String?,

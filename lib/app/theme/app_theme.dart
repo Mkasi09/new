@@ -9,7 +9,8 @@ class AppTheme {
   static const danger = Color(0xFFD32F2F);
   static const ink = Color(0xFF212121);
   static const muted = Color(0xFF757575);
-  static const surface = Color(0xFFF5F7FA);
+  static const surface = Color(0xFFF3F6FA);
+  static const border = Color(0xFFE0E7EF);
 
   static ThemeData get light {
     return ThemeData(
@@ -30,19 +31,55 @@ class AppTheme {
         foregroundColor: Colors.white,
         centerTitle: false,
         elevation: 0,
+        scrolledUnderElevation: 0,
         titleTextStyle: TextStyle(
           color: Colors.white,
           fontSize: 19,
           fontWeight: FontWeight.w800,
         ),
       ),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: Colors.white,
+        indicatorColor: secondary.withValues(alpha: 0.14),
+        elevation: 0,
+        labelTextStyle: WidgetStateProperty.resolveWith(
+          (states) => TextStyle(
+            color: states.contains(WidgetState.selected) ? primary : muted,
+            fontSize: 12,
+            fontWeight: states.contains(WidgetState.selected)
+                ? FontWeight.w900
+                : FontWeight.w700,
+          ),
+        ),
+        iconTheme: WidgetStateProperty.resolveWith(
+          (states) => IconThemeData(
+            color: states.contains(WidgetState.selected) ? primary : muted,
+          ),
+        ),
+      ),
       cardTheme: CardThemeData(
         color: Colors.white,
-        elevation: 0,
+        elevation: 1,
+        shadowColor: const Color(0x1A0D47A1),
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8),
-          side: const BorderSide(color: Color(0xFFE4E8EF)),
+          side: const BorderSide(color: border),
+        ),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          textStyle: const TextStyle(fontWeight: FontWeight.w900),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          side: const BorderSide(color: border),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          textStyle: const TextStyle(fontWeight: FontWeight.w900),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(

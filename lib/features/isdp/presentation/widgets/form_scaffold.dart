@@ -58,7 +58,7 @@ class FormActionBar extends StatelessWidget {
 
   final IconData primaryIcon;
   final String primaryLabel;
-  final VoidCallback onPrimary;
+  final VoidCallback? onPrimary;
   final VoidCallback? onCancel;
 
   @override

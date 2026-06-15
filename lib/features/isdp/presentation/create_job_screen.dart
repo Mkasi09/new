@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../data/demo_people.dart';
 import '../domain/entities.dart';
 import 'widgets/form_scaffold.dart';
 
@@ -150,7 +149,6 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
     final site = _siteController.text.trim();
     final address = _addressController.text.trim();
     final scope = _scopeController.text.trim();
-    final supervisor = demoSupervisors.first;
     if (site.isEmpty || address.isEmpty || scope.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -179,7 +177,6 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
       status: 'Assigned to Supervisor',
       priority: _priority,
       dueAt: _dueAt,
-      supervisor: supervisor.name,
     );
     final onCreated = widget.onCreated;
     if (onCreated != null) {

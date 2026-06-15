@@ -1,11 +1,11 @@
 {
-    "name": "Commit ISDP",
-    "short_name": "Commit ISDP",
+    "name": "PHEPHA MV ISDP",
+    "short_name": "PHEPHA MV ISDP",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "Commit Integrated Service Delivery Platform.",
+    "description": "PHEPHA MV Integrated Service Delivery Platform.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

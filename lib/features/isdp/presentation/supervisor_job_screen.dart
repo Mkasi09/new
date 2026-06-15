@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../app/theme/app_theme.dart';
 import '../domain/entities.dart';
 import 'widgets/common.dart';
+import 'widgets/evidence_photo_thumbnail.dart';
 
 class SupervisorJobScreen extends StatelessWidget {
   const SupervisorJobScreen({
@@ -10,16 +11,12 @@ class SupervisorJobScreen extends StatelessWidget {
     required this.order,
     required this.onAccept,
     required this.onAssign,
-    required this.onMessage,
-    required this.onFollowUp,
     required this.onClose,
   });
 
   final WorkOrder order;
   final VoidCallback onAccept;
   final VoidCallback onAssign;
-  final VoidCallback onMessage;
-  final VoidCallback onFollowUp;
   final VoidCallback onClose;
 
   @override
@@ -44,68 +41,32 @@ class SupervisorJobScreen extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 12),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  order.site,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  order.address,
-                  style: const TextStyle(color: AppTheme.muted),
-                ),
-                const SizedBox(height: 12),
-                Text(order.scope),
-                const SizedBox(height: 14),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    InfoChip(icon: Icons.badge_outlined, label: order.id),
-                    InfoChip(icon: Icons.schedule_outlined, label: order.sla),
-                    InfoChip(
-                      icon: Icons.person_outline,
-                      label: order.assignedTo ?? 'No technician',
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
+        JobOverviewPanel(order: order),
         const SizedBox(height: 14),
         _SupervisorProgress(order: order),
         const SizedBox(height: 14),
         _SupervisorEvidence(order: order),
-        const SizedBox(height: 18),
-        FilledButton.icon(
-          onPressed: awaitingAcceptance ? onAccept : onAssign,
-          icon: Icon(
-            awaitingAcceptance
-                ? Icons.assignment_turned_in_outlined
-                : Icons.person_add_alt,
+        const SizedBox(height: 14),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                FilledButton.icon(
+                  onPressed: awaitingAcceptance ? onAccept : onAssign,
+                  icon: Icon(
+                    awaitingAcceptance
+                        ? Icons.assignment_turned_in_outlined
+                        : Icons.person_add_alt,
+                  ),
+                  label: Text(
+                    awaitingAcceptance ? 'Accept Job' : 'Assign Technician',
+                  ),
+                ),
+              ],
+            ),
           ),
-          label: Text(awaitingAcceptance ? 'Accept Job' : 'Assign Technician'),
-        ),
-        const SizedBox(height: 10),
-        OutlinedButton.icon(
-          onPressed: onMessage,
-          icon: const Icon(Icons.message_outlined),
-          label: const Text('Message'),
-        ),
-        const SizedBox(height: 10),
-        OutlinedButton.icon(
-          onPressed: onFollowUp,
-          icon: const Icon(Icons.call_outlined),
-          label: const Text('Follow Up'),
         ),
       ],
     );
@@ -137,12 +98,14 @@ class _SupervisorEvidence extends StatelessWidget {
               title: 'Before photo',
               detail: 'Captured before work started.',
               complete: beforeSaved,
+              photoData: order.evidencePhotos['before'],
             ),
             const SizedBox(height: 10),
             _EvidenceRow(
               title: 'After photo',
               detail: 'Captured after work was completed.',
               complete: afterSaved,
+              photoData: order.evidencePhotos['after'],
             ),
           ],
         ),
@@ -156,23 +119,26 @@ class _EvidenceRow extends StatelessWidget {
     required this.title,
     required this.detail,
     required this.complete,
+    required this.photoData,
   });
 
   final String title;
   final String detail;
   final bool complete;
+  final String? photoData;
 
   @override
   Widget build(BuildContext context) {
     final color = complete ? AppTheme.success : AppTheme.warning;
 
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        IconPill(
-          icon: complete
-              ? Icons.check_circle_outline
-              : Icons.image_not_supported_outlined,
-          color: color,
+        EvidencePhotoViewer(
+          photoData: photoData,
+          complete: complete,
+          title: title,
+          size: 82,
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -182,11 +148,17 @@ class _EvidenceRow extends StatelessWidget {
               Text(title, style: const TextStyle(fontWeight: FontWeight.w900)),
               const SizedBox(height: 3),
               Text(detail, style: const TextStyle(color: AppTheme.muted)),
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: StatusChip(
+                  label: complete ? 'Photo visible' : 'Missing',
+                  color: color,
+                ),
+              ),
             ],
           ),
         ),
-        const SizedBox(width: 8),
-        StatusChip(label: complete ? 'Saved' : 'Missing', color: color),
       ],
     );
   }
