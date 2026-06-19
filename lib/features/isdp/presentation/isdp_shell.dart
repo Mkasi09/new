@@ -96,8 +96,12 @@ class _IsdpShellState extends State<IsdpShell> {
             StreamBuilder<SyncStatus>(
               stream: _repository.watchSyncStatus(),
               initialData: SyncStatus.online,
-              builder: (context, snapshot) =>
-                  _SyncStatusButton(status: snapshot.data ?? SyncStatus.online),
+              builder: (context, snapshot) {
+                final status = snapshot.data ?? SyncStatus.online;
+                return status == SyncStatus.offline
+                    ? _SyncStatusButton(status: status)
+                    : const SizedBox.shrink();
+              },
             ),
             _NotificationButton(
               count: _notifications.where((item) => !item.read).length,
@@ -111,8 +115,8 @@ class _IsdpShellState extends State<IsdpShell> {
           initialData: _workOrders,
           builder: (context, snapshot) {
             final liveOrders = _mergeWorkOrders(snapshot.data ?? const []);
-            _observeOrderNotifications(liveOrders);
             final visibleOrders = _visibleOrdersForRole(liveOrders);
+            _observeOrderNotifications(visibleOrders);
             final selectedOrder = _selectedOrder(visibleOrders);
             final workflowPage = _buildWorkflowPage(visibleOrders);
             final pages = [
@@ -928,83 +932,115 @@ class _IsdpShellState extends State<IsdpShell> {
   }
 
   Future<void> _showNotifications() async {
-    final unreadNotifications = _notifications
-        .where((item) => !item.read)
-        .toList();
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
-      builder: (context) => SafeArea(
-        child: SizedBox(
-          height: MediaQuery.sizeOf(context).height * 0.72,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 4, 12, 12),
-                child: Row(
-                  children: [
-                    const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Activity Centre',
-                            style: TextStyle(
-                              fontSize: 21,
-                              fontWeight: FontWeight.w900,
-                            ),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) {
+          final hasUnread = _notifications.any((item) => !item.read);
+          return SafeArea(
+            child: SizedBox(
+              height: MediaQuery.sizeOf(context).height * 0.72,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 4, 12, 12),
+                    child: Row(
+                      children: [
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Activity Centre',
+                                style: TextStyle(
+                                  fontSize: 21,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              Text(
+                                'Recent job updates and required actions',
+                                style: TextStyle(color: Colors.grey),
+                              ),
+                            ],
                           ),
-                          Text(
-                            'Unread job updates and required actions',
-                            style: TextStyle(color: Colors.grey),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (unreadNotifications.isNotEmpty)
-                      TextButton(
-                        onPressed: () {
-                          setState(() {
-                            for (final item in _notifications) {
-                              item.read = true;
-                            }
-                          });
-                          Navigator.pop(context);
-                          _showNotifications();
-                        },
-                        child: const Text('Mark all read'),
-                      ),
-                  ],
-                ),
-              ),
-              const Divider(height: 1),
-              Expanded(
-                child: unreadNotifications.isEmpty
-                    ? const _NotificationEmptyState()
-                    : ListView.builder(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        itemCount: unreadNotifications.length,
-                        itemBuilder: (context, index) {
-                          final item = unreadNotifications[index];
-                          return _NotificationCard(
-                            notification: item,
-                            onTap: () {
-                              setState(() => item.read = true);
-                              Navigator.pop(context);
-                              final order = _knownOrders[item.orderId];
-                              if (order != null) _openOrder(order);
+                        ),
+                        if (hasUnread)
+                          TextButton(
+                            onPressed: () {
+                              setState(() {
+                                for (final item in _notifications) {
+                                  item.read = true;
+                                }
+                              });
+                              setSheetState(() {});
                             },
-                          );
-                        },
-                      ),
+                            child: const Text('Mark all read'),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  Expanded(
+                    child: _notifications.isEmpty
+                        ? const _NotificationEmptyState()
+                        : ListView.builder(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            itemCount: _notifications.length,
+                            itemBuilder: (context, index) {
+                              final item = _notifications[index];
+                              return _NotificationCard(
+                                notification: item,
+                                onTap: () {
+                                  setState(() => item.read = true);
+                                  Navigator.pop(context);
+                                  _openNotificationTarget(item);
+                                },
+                              );
+                            },
+                          ),
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
+  }
+
+  void _openNotificationTarget(_AppNotification notification) {
+    final order =
+        _knownOrders[notification.orderId] ??
+        _workOrders.cast<WorkOrder?>().firstWhere(
+          (order) => order?.id == notification.orderId,
+          orElse: () => null,
+        );
+    if (order == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This job is no longer in your queue.')),
+      );
+      return;
+    }
+
+    if (_role == AppRole.admin) {
+      if (notification.type == _NotificationType.action ||
+          order.status == 'Submitted') {
+        _openReviewScreen(order);
+      } else {
+        _openAdminJob(order);
+      }
+      return;
+    }
+
+    if (_role == AppRole.supervisor) {
+      _openSupervisorJobScreen(order);
+      return;
+    }
+
+    _openOrder(order);
   }
 
   _AppNotification _statusNotification(WorkOrder order) {

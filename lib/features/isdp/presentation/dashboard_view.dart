@@ -460,11 +460,12 @@ class _TechnicianHome extends StatelessWidget {
 
     return AppScrollView(
       children: [
-        _TechnicianHero(order: order, progress: progress),
-        const SizedBox(height: 12),
-        _PendingJobsCard(count: pendingJobs),
-        const SizedBox(height: 12),
-        _CountdownCard(order: order, arrivalVerified: arrivalVerified),
+        _TodaySummaryCard(
+          order: order,
+          pendingJobs: pendingJobs,
+          progress: progress,
+          arrivalVerified: arrivalVerified,
+        ),
         const SizedBox(height: 12),
         _TodayActionPanel(
           progress: progress,
@@ -509,8 +510,115 @@ class _TechnicianHome extends StatelessWidget {
   }
 }
 
-class _CountdownCard extends StatelessWidget {
-  const _CountdownCard({required this.order, required this.arrivalVerified});
+class _TodaySummaryCard extends StatelessWidget {
+  const _TodaySummaryCard({
+    required this.order,
+    required this.pendingJobs,
+    required this.progress,
+    required this.arrivalVerified,
+  });
+
+  final WorkOrder order;
+  final int pendingJobs;
+  final double progress;
+  final bool arrivalVerified;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                IconPill(
+                  icon: Icons.route_outlined,
+                  color: workOrderStatusColor(order.status),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Today\'s Job',
+                        style: TextStyle(
+                          color: AppTheme.muted,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        order.site,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        order.address,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: AppTheme.muted),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                StatusChip(
+                  label: order.status,
+                  color: workOrderStatusColor(order.status),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: LinearProgressIndicator(
+                value: progress,
+                minHeight: 8,
+                backgroundColor: AppTheme.primary.withValues(alpha: 0.12),
+                valueColor: const AlwaysStoppedAnimation<Color>(
+                  AppTheme.primary,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                InfoChip(icon: Icons.badge_outlined, label: order.id),
+                InfoChip(
+                  icon: Icons.pending_actions_outlined,
+                  label: pendingJobs == 1
+                      ? '1 pending job'
+                      : '$pendingJobs pending jobs',
+                ),
+                InfoChip(icon: Icons.schedule_outlined, label: order.sla),
+                InfoChip(
+                  icon: Icons.priority_high,
+                  label: order.priority.label,
+                ),
+                _CountdownChip(order: order, arrivalVerified: arrivalVerified),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CountdownChip extends StatelessWidget {
+  const _CountdownChip({required this.order, required this.arrivalVerified});
 
   final WorkOrder order;
   final bool arrivalVerified;
@@ -518,34 +626,21 @@ class _CountdownCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (order.status == 'Submitted' || order.status == 'Approved') {
-      return _CountdownFrame(
+      return InfoChip(
         icon: Icons.done_all,
-        color: AppTheme.success,
-        title: order.status == 'Approved'
-            ? 'Job approved'
-            : 'Submitted for approval',
-        detail: order.status == 'Approved'
-            ? 'This job is complete.'
-            : 'Waiting for admin review and approval.',
+        label: order.status == 'Approved' ? 'Approved' : 'Submitted',
       );
     }
 
     final dueAt = order.dueAt;
     if (dueAt == null) {
-      return _CountdownFrame(
-        icon: Icons.schedule_outlined,
-        color: AppTheme.warning,
-        title: 'Due time not set',
-        detail: order.sla,
-      );
+      return InfoChip(icon: Icons.schedule_outlined, label: 'Due not set');
     }
 
     if (!arrivalVerified) {
-      return _CountdownFrame(
+      return InfoChip(
         icon: Icons.qr_code_scanner,
-        color: AppTheme.muted,
-        title: 'Scan QR to start countdown',
-        detail: 'Due by ${_formatDateTime(dueAt)}',
+        label: 'Due ${_formatDateTime(dueAt)}',
       );
     }
 
@@ -556,106 +651,13 @@ class _CountdownCard extends StatelessWidget {
         final late = remaining.isNegative;
         final displayDuration = late ? remaining.abs() : remaining;
 
-        return _CountdownFrame(
+        return InfoChip(
           icon: late ? Icons.warning_amber_outlined : Icons.timer_outlined,
-          color: late ? AppTheme.danger : AppTheme.primary,
-          title: late
-              ? 'Late by ${_formatLongDuration(displayDuration)}'
+          label: late
+              ? 'Late ${_formatLongDuration(displayDuration)}'
               : 'Time left ${_formatClock(displayDuration)}',
-          detail: 'Due by ${_formatDateTime(dueAt)}',
         );
       },
-    );
-  }
-}
-
-class _PendingJobsCard extends StatelessWidget {
-  const _PendingJobsCard({required this.count});
-
-  final int count;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = count > 0 ? AppTheme.warning : AppTheme.success;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Row(
-          children: [
-            IconPill(icon: Icons.pending_actions_outlined, color: color),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                count == 1 ? '1 pending job' : '$count pending jobs',
-                style: const TextStyle(fontWeight: FontWeight.w900),
-              ),
-            ),
-            StatusChip(label: count > 0 ? 'Open' : 'Clear', color: color),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _CountdownFrame extends StatelessWidget {
-  const _CountdownFrame({
-    required this.icon,
-    required this.color,
-    required this.title,
-    required this.detail,
-  });
-
-  final IconData icon;
-  final Color color;
-  final String title;
-  final String detail;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: color.withValues(alpha: 0.18)),
-              ),
-              child: Icon(icon, color: color),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: color,
-                      fontSize: 17,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    detail,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: AppTheme.muted),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -726,188 +728,6 @@ class _RoleHero extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(subtitle, style: const TextStyle(color: Colors.white70)),
               ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _TechnicianHero extends StatelessWidget {
-  const _TechnicianHero({required this.order, required this.progress});
-
-  final WorkOrder order;
-  final double progress;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF0F5FA8), Color(0xFF118A9E)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: AppTheme.primary.withValues(alpha: 0.18),
-            blurRadius: 18,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.22),
-                  ),
-                ),
-                child: const Icon(Icons.route, color: Colors.white, size: 28),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Today\'s Job',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 24,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      order.site,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Text(
-            order.address,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.white70),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: LinearProgressIndicator(
-                    value: progress,
-                    minHeight: 8,
-                    backgroundColor: Colors.white.withValues(alpha: 0.22),
-                    valueColor: const AlwaysStoppedAnimation<Color>(
-                      Color(0xFFB8F1E7),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              _HeroProgressPill(value: '${(progress * 100).round()}%'),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _HeroInfoPill(icon: Icons.badge_outlined, label: order.id),
-              _HeroInfoPill(icon: Icons.schedule_outlined, label: order.sla),
-              _HeroInfoPill(
-                icon: Icons.priority_high,
-                label: order.priority.label,
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _HeroProgressPill extends StatelessWidget {
-  const _HeroProgressPill({required this.value});
-
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.16),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-      ),
-      child: Text(
-        value,
-        style: const TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.w900,
-          fontSize: 12,
-        ),
-      ),
-    );
-  }
-}
-
-class _HeroInfoPill extends StatelessWidget {
-  const _HeroInfoPill({required this.icon, required this.label});
-
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: Colors.white, size: 15),
-          const SizedBox(width: 5),
-          Flexible(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-              ),
             ),
           ),
         ],

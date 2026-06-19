@@ -260,9 +260,7 @@ class _PhotoUploadTile extends StatelessWidget {
             slot.title,
             style: const TextStyle(fontWeight: FontWeight.w900),
           ),
-          subtitle: Text(
-            uploaded ? 'Uploaded: ${slot.keyName}_photo.jpg' : slot.detail,
-          ),
+          subtitle: Text(uploaded ? 'Uploaded: ${slot.keyName}' : slot.detail),
           trailing: uploaded
               ? IconButton.filledTonal(
                   tooltip: 'Replace photo',
