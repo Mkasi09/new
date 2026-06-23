@@ -11,6 +11,8 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 const _firebaseApiKey = 'AIzaSyD0pYM5_xXEaYhtRqzi4vpPAGhNDVEBKYA';
 const _firebaseProjectId = 'magzmotron-5ae93';
+const _supportContactNumber = '0791762956';
+const _supportContactMessage = 'Contact $_supportContactNumber.';
 
 void main() {
   runApp(const IsdpAdminApp());
@@ -134,7 +136,7 @@ class _LoginPageState extends State<LoginPage> {
                   const _BrandName(fontSize: 28, suffix: ' Admin'),
                   const SizedBox(height: 6),
                   const Text(
-                    'Sign in to manage jobs, teams, materials, acceptance, and billing readiness.',
+                    'Sign in to manage jobs, teams, acceptance, and billing readiness.',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: AppColors.muted),
                   ),
@@ -272,13 +274,17 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
   String _status = 'All';
   WorkOrder? _selectedOrder;
   final List<_AdminNotification> _notifications = [];
+  var _technicians = <AdminUserProfile>[];
+  var _isFetching = false;
+  var _refreshQueued = false;
   Timer? _poller;
 
   @override
   void initState() {
     super.initState();
     _loadOrders();
-    _poller = Timer.periodic(const Duration(seconds: 10), (_) => _loadOrders());
+    _loadTechnicians();
+    _poller = Timer.periodic(const Duration(seconds: 5), (_) => _loadOrders());
   }
 
   @override
@@ -361,13 +367,13 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
                 onAction: _performAction,
                 onAssign: () => _openAssign(_selectedOrder!),
                 onShowQr: () => _showQrDialog(_selectedOrder!),
+                onDelete: () => _confirmDeleteOrder(_selectedOrder!),
               ),
       AdminSection.teams => TeamsView(
         orders: _orders,
         onAssign: _openAssign,
         onOpen: _openOrder,
       ),
-      AdminSection.materials => const MaterialsView(),
       AdminSection.acceptance => AcceptanceView(
         orders: _orders,
         onApprove: (order) => _performAction(order, OrderAction.approve),
@@ -383,7 +389,7 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
       final matchesStatus = switch (_status) {
         'All' => true,
         'Open' => order.status != 'Approved',
-        'Due soon' => order.isDueSoon,
+        'Due soon' => order.isOpenDueSoon,
         _ => order.status == _status,
       };
       if (!matchesStatus) return false;
@@ -396,7 +402,7 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
         order.status,
         order.sla,
         order.supervisor ?? '',
-        order.assignedTo ?? '',
+        order.technicianLabel ?? '',
       ].any((value) => value.toLowerCase().contains(query));
     }).toList();
   }
@@ -417,6 +423,12 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
   }
 
   Future<void> _loadOrders() async {
+    if (_isFetching) {
+      _refreshQueued = true;
+      return;
+    }
+
+    _isFetching = true;
     setState(() {
       _isSyncing = true;
       if (_orders.isEmpty) _isLoading = true;
@@ -438,12 +450,30 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
     } catch (error) {
       // Keep the last successful view visible when a background refresh fails.
     } finally {
+      _isFetching = false;
       if (mounted) {
         setState(() {
           _isLoading = false;
           _isSyncing = false;
         });
       }
+      if (_refreshQueued && mounted) {
+        _refreshQueued = false;
+        unawaited(_loadOrders());
+      }
+    }
+  }
+
+  Future<void> _loadTechnicians() async {
+    try {
+      final technicians = await widget.repository.fetchTechnicians(
+        widget.session,
+      );
+      if (!mounted) return;
+      setState(() => _technicians = technicians);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _technicians = const []);
     }
   }
 
@@ -601,7 +631,7 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
 
     await _runMutation(
       () => widget.repository.createWorkOrder(widget.session, created),
-      success: 'Job ${created.id} created and assigned to supervisor.',
+      success: null,
     );
   }
 
@@ -612,14 +642,49 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
     );
   }
 
-  Future<void> _openAssign(WorkOrder order) async {
-    final technician = await showDialog<String>(
+  Future<void> _confirmDeleteOrder(WorkOrder order) async {
+    final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AssignTechnicianDialog(order: order),
+      builder: (context) => AlertDialog(
+        title: const Text('Delete job?'),
+        content: Text(
+          'Delete ${order.id} for ${order.site}? This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(context, true),
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('Delete'),
+          ),
+        ],
+      ),
     );
-    if (technician == null) return;
+    if (confirmed != true) return;
+    await _runMutation(
+      () => widget.repository.deleteWorkOrder(widget.session, order),
+      success: '${order.id} deleted.',
+    );
+    if (!mounted) return;
+    setState(() {
+      _orders = _orders.where((candidate) => candidate.id != order.id).toList();
+      if (_selectedOrder?.id == order.id) _selectedOrder = null;
+    });
+  }
+
+  Future<void> _openAssign(WorkOrder order) async {
+    final technicians = await showDialog<List<String>>(
+      context: context,
+      builder: (context) =>
+          AssignTechnicianDialog(order: order, technicians: _technicians),
+    );
+    if (technicians == null) return;
+    final names = technicians.map(displayPersonName).toSet().toList()..sort();
     await _performAction(
-      order.copyWith(assignedTo: technician),
+      order.copyWith(assignedTo: names.join(', '), assignedTechnicians: names),
       OrderAction.assign,
     );
   }
@@ -640,7 +705,7 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
           () => widget.repository.updateWorkOrder(
             widget.session,
             order.copyWith(status: 'Dispatched'),
-            action: 'assigned to ${order.assignedTo}',
+            action: 'assigned to ${order.technicianLabel ?? order.assignedTo}',
           ),
           success: '${order.id} dispatched.',
         );
@@ -694,7 +759,7 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
 
   Future<void> _runMutation(
     Future<void> Function() mutation, {
-    required String success,
+    required String? success,
   }) async {
     setState(() {
       _isSyncing = true;
@@ -703,14 +768,18 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
       await mutation();
       await _loadOrders();
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(success)));
+      if (success != null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(success)));
+      }
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('That action could not be completed. Nothing changed.'),
+          content: Text(
+            'That action could not be completed. Nothing changed. $_supportContactMessage',
+          ),
         ),
       );
     } finally {
@@ -736,7 +805,7 @@ class DashboardView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final open = orders.where((job) => job.status != 'Approved').length;
-    final dueSoon = orders.where((job) => job.isDueSoon).length;
+    final dueSoon = orders.where((job) => job.isOpenDueSoon).length;
     final submitted = orders.where((job) => job.status == 'Submitted').length;
     final billingReady = orders.where((job) => job.status == 'Approved').length;
 
@@ -994,6 +1063,7 @@ class OrderDetailView extends StatelessWidget {
     required this.onAction,
     required this.onAssign,
     required this.onShowQr,
+    required this.onDelete,
   });
 
   final WorkOrder order;
@@ -1001,6 +1071,7 @@ class OrderDetailView extends StatelessWidget {
   final void Function(WorkOrder order, OrderAction action) onAction;
   final VoidCallback onAssign;
   final VoidCallback onShowQr;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -1024,6 +1095,15 @@ class OrderDetailView extends StatelessWidget {
               ),
             ),
             _StatusPill(label: order.status, color: _statusColor(order.status)),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: onDelete,
+              icon: const Icon(Icons.delete_outline),
+              label: const Text('Delete'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.danger,
+              ),
+            ),
           ],
         ),
         const SizedBox(height: 12),
@@ -1046,7 +1126,7 @@ class OrderDetailView extends StatelessWidget {
               ),
               _InfoTile(
                 'Technician',
-                order.assignedTo ?? 'Unassigned',
+                order.technicianLabel ?? 'Unassigned',
                 Icons.engineering_outlined,
               ),
             ],
@@ -1558,21 +1638,27 @@ class _EvidencePhotoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bytes = _decodeEvidencePhoto(photoData);
+    final photoUrl = _evidencePhotoUrl(photoData);
     return SizedBox(
       width: 320,
       child: Card(
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          onTap: bytes == null
+          onTap: bytes == null && photoUrl == null
               ? null
-              : () => _openEvidencePhoto(context, title, bytes),
+              : () => _openEvidencePhoto(
+                  context,
+                  title,
+                  bytes: bytes,
+                  photoUrl: photoUrl,
+                ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               SizedBox(
                 width: double.infinity,
                 height: 180,
-                child: bytes == null
+                child: bytes == null && photoUrl == null
                     ? ColoredBox(
                         color: AppColors.surface,
                         child: Center(
@@ -1600,7 +1686,23 @@ class _EvidencePhotoCard extends StatelessWidget {
                     : Stack(
                         fit: StackFit.expand,
                         children: [
-                          Image.memory(bytes, fit: BoxFit.cover),
+                          if (bytes != null)
+                            Image.memory(bytes, fit: BoxFit.cover)
+                          else
+                            Image.network(
+                              photoUrl!,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) =>
+                                  const ColoredBox(
+                                    color: AppColors.surface,
+                                    child: Center(
+                                      child: Icon(
+                                        Icons.image_not_supported_outlined,
+                                        color: AppColors.muted,
+                                      ),
+                                    ),
+                                  ),
+                            ),
                           const Positioned(
                             right: 10,
                             bottom: 10,
@@ -1652,7 +1754,12 @@ class _PhotoExpandBadge extends StatelessWidget {
   }
 }
 
-void _openEvidencePhoto(BuildContext context, String title, Uint8List bytes) {
+void _openEvidencePhoto(
+  BuildContext context,
+  String title, {
+  Uint8List? bytes,
+  String? photoUrl,
+}) {
   Navigator.of(context).push(
     MaterialPageRoute<void>(
       fullscreenDialog: true,
@@ -1667,12 +1774,22 @@ void _openEvidencePhoto(BuildContext context, String title, Uint8List bytes) {
           child: InteractiveViewer(
             minScale: 0.8,
             maxScale: 5,
-            child: Image.memory(bytes, fit: BoxFit.contain),
+            child: bytes != null
+                ? Image.memory(bytes, fit: BoxFit.contain)
+                : Image.network(photoUrl!, fit: BoxFit.contain),
           ),
         ),
       ),
     ),
   );
+}
+
+String? _evidencePhotoUrl(String? photoData) {
+  if (photoData == null || photoData.isEmpty) return null;
+  final uri = Uri.tryParse(photoData);
+  if (uri == null || !uri.hasScheme) return null;
+  if (uri.scheme != 'http' && uri.scheme != 'https') return null;
+  return photoData;
 }
 
 Uint8List? _decodeEvidencePhoto(String? photoData) {
@@ -1816,7 +1933,8 @@ class _JobQrDialogState extends State<JobQrDialog> {
   Future<void> _export() async {
     setState(() => _busy = true);
     try {
-      final file = await _writeQrPdf(widget.order);
+      final file = await _saveQrPdfAs(widget.order);
+      if (file == null) return;
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -1839,7 +1957,7 @@ class _JobQrDialogState extends State<JobQrDialog> {
     if (recipient == null) return;
     setState(() => _busy = true);
     try {
-      final file = await _writeQrPdf(widget.order);
+      final file = await _writeQrPdfAttachment(widget.order);
       final subject = 'Site QR - ${widget.order.id}';
       final body =
           'Hello,\n\nPlease find the site QR details below.\n\n'
@@ -2047,7 +2165,7 @@ class TeamsView extends StatelessWidget {
           (order) =>
               order.status == 'Accepted by Supervisor' ||
               order.status == 'Assigned to Supervisor' ||
-              order.assignedTo == null,
+              order.technicianLabel == null,
         )
         .toList();
 
@@ -2081,53 +2199,6 @@ class TeamsView extends StatelessWidget {
                     name: person.name,
                     email: person.email,
                     team: person.team,
-                  ),
-                )
-                .toList(),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class MaterialsView extends StatelessWidget {
-  const MaterialsView({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return _Page(
-      children: [
-        _Panel(
-          title: 'Material Reconciliation',
-          trailing: FilledButton.icon(
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Barcode scanner integration is coming soon.'),
-                ),
-              );
-            },
-            icon: const Icon(Icons.qr_code_scanner),
-            label: const Text('Scan barcode'),
-          ),
-          child: Column(
-            children: materials
-                .map(
-                  (material) => ListTile(
-                    leading: _IconPill(
-                      icon: Icons.memory,
-                      color: material.color,
-                    ),
-                    title: Text(
-                      material.name,
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                    subtitle: Text('${material.serial} - ${material.action}'),
-                    trailing: _StatusPill(
-                      label: material.state,
-                      color: material.color,
-                    ),
                   ),
                 )
                 .toList(),
@@ -2242,7 +2313,7 @@ class AnalyticsView extends StatelessWidget {
               _MetricCard(
                 icon: Icons.timer_outlined,
                 label: 'Urgent',
-                value: '${orders.where((job) => job.isDueSoon).length}',
+                value: '${orders.where((job) => job.isOpenDueSoon).length}',
                 detail: 'Due within 12 hours',
                 color: AppColors.danger,
               ),
@@ -2268,7 +2339,10 @@ class AnalyticsView extends StatelessWidget {
     final grouped = <String, List<WorkOrder>>{};
     for (final job in orders) {
       final person =
-          job.assignedTo ?? job.supervisor ?? job.createdBy ?? 'Unassigned';
+          job.technicianLabel ??
+          job.supervisor ??
+          job.createdBy ??
+          'Unassigned';
       grouped.putIfAbsent(person, () => []).add(job);
     }
     final rows = grouped.entries.map((entry) {
@@ -2281,7 +2355,7 @@ class AnalyticsView extends StatelessWidget {
         onSite: jobs.where((job) => job.status == 'On Site').length,
         submitted: jobs.where((job) => job.status == 'Submitted').length,
         approved: jobs.where((job) => job.status == 'Approved').length,
-        urgent: jobs.where((job) => job.isDueSoon).length,
+        urgent: jobs.where((job) => job.isOpenDueSoon).length,
       );
     }).toList();
     rows.sort((a, b) => b.total.compareTo(a.total));
@@ -2480,68 +2554,107 @@ class _CreateJobDialogState extends State<CreateJobDialog> {
 }
 
 class AssignTechnicianDialog extends StatefulWidget {
-  const AssignTechnicianDialog({super.key, required this.order});
+  const AssignTechnicianDialog({
+    super.key,
+    required this.order,
+    required this.technicians,
+  });
 
   final WorkOrder order;
+  final List<AdminUserProfile> technicians;
 
   @override
   State<AssignTechnicianDialog> createState() => _AssignTechnicianDialogState();
 }
 
 class _AssignTechnicianDialogState extends State<AssignTechnicianDialog> {
-  late final TextEditingController _controller;
+  late final TextEditingController _searchController;
+  late final Set<String> _selectedNames;
 
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: widget.order.assignedTo ?? '');
+    _searchController = TextEditingController();
+    _selectedNames = {...widget.order.technicianNames};
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final query = _searchController.text.trim().toLowerCase();
+    final filtered = query.isEmpty
+        ? widget.technicians
+        : widget.technicians.where((technician) {
+            return [
+              technician.name,
+              technician.email,
+              technician.team ?? '',
+            ].any((value) => value.toLowerCase().contains(query));
+          }).toList();
+
     return AlertDialog(
-      title: const Text('Assign Technician'),
+      title: const Text('Assign Technicians'),
       content: SizedBox(
-        width: 520,
+        width: 620,
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            DropdownButtonFormField<String>(
-              initialValue:
-                  demoTechnicians.any(
-                    (technician) => technician.name == _controller.text,
-                  )
-                  ? _controller.text
-                  : null,
-              decoration: const InputDecoration(
-                labelText: 'Available technician',
-                prefixIcon: Icon(Icons.engineering_outlined),
+            TextField(
+              controller: _searchController,
+              textInputAction: TextInputAction.search,
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(
+                labelText: 'Search technicians',
+                hintText: 'Name or email',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _searchController.text.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'Clear search',
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() {});
+                        },
+                        icon: const Icon(Icons.close),
+                      ),
               ),
-              items: demoTechnicians
-                  .map(
-                    (technician) => DropdownMenuItem(
-                      value: technician.name,
-                      child: Text('${technician.name} - ${technician.team}'),
-                    ),
-                  )
-                  .toList(),
-              onChanged: (value) {
-                if (value != null) _controller.text = value;
-              },
             ),
             const SizedBox(height: 12),
-            TextField(
-              controller: _controller,
-              decoration: const InputDecoration(
-                labelText: 'Technician name or email',
-                prefixIcon: Icon(Icons.person_add_alt),
+            if (_selectedNames.isNotEmpty) ...[
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _selectedNames
+                    .map(
+                      (name) => InputChip(
+                        avatar: const Icon(Icons.person),
+                        label: Text(name),
+                        onDeleted: () =>
+                            setState(() => _selectedNames.remove(name)),
+                      ),
+                    )
+                    .toList(),
               ),
+              const SizedBox(height: 12),
+            ],
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 360),
+              child: widget.technicians.isEmpty
+                  ? const _EmptyTechnicianDirectory()
+                  : filtered.isEmpty
+                  ? const _EmptyTechnicianSearchResult()
+                  : ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: filtered.length,
+                      itemBuilder: (context, index) =>
+                          _technicianTile(filtered[index]),
+                    ),
             ),
           ],
         ),
@@ -2553,14 +2666,91 @@ class _AssignTechnicianDialogState extends State<AssignTechnicianDialog> {
         ),
         FilledButton.icon(
           onPressed: () {
-            final technician = _controller.text.trim();
-            if (technician.isEmpty) return;
-            Navigator.pop(context, technician);
+            final allowedNames = widget.technicians
+                .map((technician) => technician.name)
+                .toSet();
+            final names = _selectedNames.where(allowedNames.contains).toList()
+              ..sort();
+            if (names.isEmpty) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Select an existing technician.')),
+              );
+              return;
+            }
+            Navigator.pop(context, names);
           },
           icon: const Icon(Icons.person_add_alt),
-          label: const Text('Assign job'),
+          label: Text(
+            _selectedNames.length == 1
+                ? 'Assign job'
+                : 'Assign ${_selectedNames.length}',
+          ),
         ),
       ],
+    );
+  }
+
+  Widget _technicianTile(AdminUserProfile technician) {
+    final selected = _selectedNames.contains(technician.name);
+    return CheckboxListTile(
+      contentPadding: EdgeInsets.zero,
+      value: selected,
+      onChanged: (_) => setState(() {
+        if (selected) {
+          _selectedNames.remove(technician.name);
+        } else {
+          _selectedNames.add(technician.name);
+        }
+      }),
+      secondary: CircleAvatar(
+        backgroundColor: AppColors.primary.withValues(alpha: 0.12),
+        child: Text(
+          technician.name.isEmpty ? '?' : technician.name[0].toUpperCase(),
+          style: const TextStyle(
+            color: AppColors.primary,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      ),
+      title: Text(
+        technician.name,
+        style: const TextStyle(fontWeight: FontWeight.w900),
+      ),
+      subtitle: Text(
+        technician.team?.isNotEmpty == true
+            ? technician.team!
+            : technician.email,
+      ),
+    );
+  }
+}
+
+class _EmptyTechnicianDirectory extends StatelessWidget {
+  const _EmptyTechnicianDirectory();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.only(top: 10),
+      child: Text(
+        'No technicians are available. Add technician users first.',
+        style: TextStyle(color: AppColors.muted),
+      ),
+    );
+  }
+}
+
+class _EmptyTechnicianSearchResult extends StatelessWidget {
+  const _EmptyTechnicianSearchResult();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.only(top: 10),
+      child: Text(
+        'No technicians match this search.',
+        style: TextStyle(color: AppColors.muted),
+      ),
     );
   }
 }
@@ -2568,12 +2758,14 @@ class _AssignTechnicianDialogState extends State<AssignTechnicianDialog> {
 abstract class AdminRepository {
   Future<AuthSession> signIn({required String email, required String password});
   Future<List<WorkOrder>> fetchWorkOrders(AuthSession session);
+  Future<List<AdminUserProfile>> fetchTechnicians(AuthSession session);
   Future<void> createWorkOrder(AuthSession session, WorkOrder order);
   Future<void> updateWorkOrder(
     AuthSession session,
     WorkOrder order, {
     required String action,
   });
+  Future<void> deleteWorkOrder(AuthSession session, WorkOrder order);
 }
 
 class RestAdminRepository implements AdminRepository {
@@ -2612,19 +2804,52 @@ class RestAdminRepository implements AdminRepository {
 
   @override
   Future<List<WorkOrder>> fetchWorkOrders(AuthSession session) async {
-    final uri = _documentsUri(
-      '/work_orders',
-      query: {'pageSize': '100', 'orderBy': 'createdAt desc'},
-    );
-    final response = await _client.get(uri, headers: _headers(session));
-    final body = _decode(response);
-    if (response.statusCode >= 400) throw ApiException.fromBody(body);
+    final orders = <WorkOrder>[];
+    String? pageToken;
+    do {
+      final query = <String, dynamic>{'pageSize': '100'};
+      if (pageToken != null) query['pageToken'] = pageToken;
+      final uri = _documentsUri('/work_orders', query: query);
+      final response = await _client.get(uri, headers: _headers(session));
+      final body = _decode(response);
+      if (response.statusCode >= 400) throw ApiException.fromBody(body);
 
-    final documents = (body['documents'] as List<dynamic>? ?? const []);
-    return documents
-        .whereType<Map<String, dynamic>>()
-        .map(WorkOrder.fromFirestoreDocument)
-        .toList();
+      final documents = (body['documents'] as List<dynamic>? ?? const []);
+      orders.addAll(
+        documents.whereType<Map<String, dynamic>>().map(
+          WorkOrder.fromFirestoreDocument,
+        ),
+      );
+      pageToken = body['nextPageToken'] as String?;
+    } while (pageToken != null && pageToken.isNotEmpty);
+
+    return orders;
+  }
+
+  @override
+  Future<List<AdminUserProfile>> fetchTechnicians(AuthSession session) async {
+    final users = <AdminUserProfile>[];
+    String? pageToken;
+    do {
+      final query = <String, dynamic>{'pageSize': '100'};
+      if (pageToken != null) query['pageToken'] = pageToken;
+      final uri = _documentsUri('/users', query: query);
+      final response = await _client.get(uri, headers: _headers(session));
+      final body = _decode(response);
+      if (response.statusCode >= 400) throw ApiException.fromBody(body);
+
+      final documents = (body['documents'] as List<dynamic>? ?? const []);
+      users.addAll(
+        documents
+            .whereType<Map<String, dynamic>>()
+            .map(AdminUserProfile.fromFirestoreDocument)
+            .where((user) => user.role == 'technician'),
+      );
+      pageToken = body['nextPageToken'] as String?;
+    } while (pageToken != null && pageToken.isNotEmpty);
+
+    users.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    return users;
   }
 
   @override
@@ -2676,6 +2901,15 @@ class RestAdminRepository implements AdminRepository {
     }
   }
 
+  @override
+  Future<void> deleteWorkOrder(AuthSession session, WorkOrder order) async {
+    final uri = _documentsUri('/work_orders/${order.id}');
+    final response = await _client.delete(uri, headers: _headers(session));
+    if (response.statusCode >= 400) {
+      throw ApiException.fromBody(_decode(response));
+    }
+  }
+
   Uri _documentsUri(String path, {Map<String, dynamic>? query}) {
     return Uri.https(
       'firestore.googleapis.com',
@@ -2700,6 +2934,41 @@ class AuthSession {
   final String idToken;
   final String email;
   final String uid;
+}
+
+class AdminUserProfile {
+  const AdminUserProfile({
+    required this.uid,
+    required this.email,
+    required this.name,
+    required this.role,
+    this.team,
+  });
+
+  final String uid;
+  final String email;
+  final String name;
+  final String role;
+  final String? team;
+
+  factory AdminUserProfile.fromFirestoreDocument(
+    Map<String, dynamic> document,
+  ) {
+    final name = document['name'] as String? ?? '';
+    final id = name.split('/').last;
+    final fields = document['fields'] as Map<String, dynamic>? ?? const {};
+    final email = _fieldString(fields['email'])?.trim() ?? '';
+    final storedName = _fieldString(fields['name'])?.trim();
+    return AdminUserProfile(
+      uid: id,
+      email: email,
+      name: storedName?.isNotEmpty == true
+          ? storedName!
+          : displayPersonName(email),
+      role: (_fieldString(fields['role']) ?? 'technician').toLowerCase(),
+      team: _fieldString(fields['team'])?.trim(),
+    );
+  }
 }
 
 enum _AdminNotificationType {
@@ -2770,6 +3039,7 @@ class WorkOrder {
     this.reviewedAt,
     this.supervisor,
     this.assignedTo,
+    this.assignedTechnicians = const [],
     this.createdBy,
   });
 
@@ -2796,6 +3066,7 @@ class WorkOrder {
   final DateTime? reviewedAt;
   final String? supervisor;
   final String? assignedTo;
+  final List<String> assignedTechnicians;
   final String? createdBy;
 
   bool get isDueSoon {
@@ -2804,6 +3075,8 @@ class WorkOrder {
     final hours = due.difference(DateTime.now()).inHours;
     return hours >= 0 && hours <= 12;
   }
+
+  bool get isOpenDueSoon => status != 'Approved' && isDueSoon;
 
   String get qrPayload => siteCode;
 
@@ -2817,6 +3090,7 @@ class WorkOrder {
     bool? reviewed,
     DateTime? reviewedAt,
     String? assignedTo,
+    List<String>? assignedTechnicians,
     String? createdBy,
   }) {
     return WorkOrder(
@@ -2843,8 +3117,28 @@ class WorkOrder {
       reviewedAt: reviewedAt ?? this.reviewedAt,
       supervisor: supervisor,
       assignedTo: assignedTo ?? this.assignedTo,
+      assignedTechnicians: assignedTechnicians ?? this.assignedTechnicians,
       createdBy: createdBy ?? this.createdBy,
     );
+  }
+
+  List<String> get technicianNames {
+    if (assignedTechnicians.isNotEmpty) {
+      return assignedTechnicians.map(displayPersonName).toList();
+    }
+    final assigned = assignedTo?.trim();
+    if (assigned == null || assigned.isEmpty) return const [];
+    return assigned
+        .split(RegExp(r'[,;]'))
+        .map(displayPersonName)
+        .where((name) => name.isNotEmpty)
+        .toList();
+  }
+
+  String? get technicianLabel {
+    final names = technicianNames;
+    if (names.isEmpty) return null;
+    return names.join(', ');
   }
 
   factory WorkOrder.fromFirestoreDocument(Map<String, dynamic> document) {
@@ -2875,6 +3169,9 @@ class WorkOrder {
       reviewedAt: _fieldDate(fields['reviewedAt']),
       supervisor: _fieldString(fields['supervisor']),
       assignedTo: _fieldString(fields['assignedTo']),
+      assignedTechnicians: _fieldStringList(
+        fields['assignedTechnicians'],
+      ).map(displayPersonName).where((name) => name.isNotEmpty).toList(),
       createdBy: _fieldString(fields['createdBy']),
     );
   }
@@ -2897,6 +3194,9 @@ class WorkOrder {
       'evidenceUploaded': _boolField(evidenceUploaded),
       'evidenceSlots': _arrayField(evidenceSlots.map(_stringField).toList()),
       'evidencePhotos': _mapField(evidencePhotos),
+      'assignedTechnicians': _arrayField(
+        assignedTechnicians.map(_stringField).toList(),
+      ),
       'reviewed': _boolField(reviewed),
     };
     void addDate(String key, DateTime? value) {
@@ -2952,7 +3252,6 @@ enum AdminSection {
   dashboard('Dashboard', Icons.dashboard_outlined),
   workOrders('Work orders', Icons.assignment_outlined),
   teams('Field teams', Icons.people_alt_outlined),
-  materials('Materials', Icons.inventory_2_outlined),
   acceptance('Acceptance', Icons.fact_check_outlined),
   analytics('Analytics', Icons.query_stats_outlined);
 
@@ -2973,22 +3272,6 @@ class DemoPerson {
   final String name;
   final String email;
   final String team;
-}
-
-class MaterialLine {
-  const MaterialLine(
-    this.name,
-    this.serial,
-    this.action,
-    this.state,
-    this.color,
-  );
-
-  final String name;
-  final String serial;
-  final String action;
-  final String state;
-  final Color color;
 }
 
 class PersonAnalytics {
@@ -3036,30 +3319,6 @@ const demoTechnicians = [
     name: 'Lindiwe S.',
     email: 'lindiwe.tech@commit.co.sz',
     team: 'Field Team C',
-  ),
-];
-
-const materials = [
-  MaterialLine(
-    'Wi-Fi router',
-    'SN: RTR-874332',
-    'Issued to active job',
-    'Install',
-    AppColors.primary,
-  ),
-  MaterialLine(
-    'Faulty router',
-    'SN: OLD-RTR-192840',
-    'Return to logistics',
-    'Pending',
-    AppColors.warning,
-  ),
-  MaterialLine(
-    'Network cable kit',
-    'BOM: CABLE-KIT-4',
-    'Used onsite',
-    'Matched',
-    AppColors.success,
   ),
 ];
 
@@ -3663,7 +3922,9 @@ class _DispatchRow extends StatelessWidget {
         '${order.id} - ${order.site}',
         style: const TextStyle(fontWeight: FontWeight.w800),
       ),
-      subtitle: Text('Current technician: ${order.assignedTo ?? 'Unassigned'}'),
+      subtitle: Text(
+        'Current technician: ${order.technicianLabel ?? 'Unassigned'}',
+      ),
       trailing: Wrap(
         crossAxisAlignment: WrapCrossAlignment.center,
         spacing: 8,
@@ -4149,12 +4410,25 @@ String _friendlyError(Object error) {
   if (raw.contains('INVALID_LOGIN_CREDENTIALS') ||
       raw.contains('EMAIL_NOT_FOUND') ||
       raw.contains('INVALID_PASSWORD')) {
-    return 'Email or password is incorrect.';
+    return 'Email or password is incorrect. $_supportContactMessage';
   }
   if (raw.contains('PERMISSION_DENIED')) {
-    return 'Your account does not have access to this area.';
+    return 'Your account does not have access to this area. $_supportContactMessage';
   }
-  return 'This could not be completed right now. Please try again.';
+  return 'This could not be completed right now. Please try again. $_supportContactMessage';
+}
+
+String displayPersonName(String? value) {
+  final raw = value?.trim();
+  if (raw == null || raw.isEmpty) return '';
+  if (!raw.contains('@')) return raw;
+  final localPart = raw.split('@').first.trim();
+  if (localPart.isEmpty) return raw;
+  return localPart
+      .split(RegExp(r'[._-]+'))
+      .where((part) => part.isNotEmpty)
+      .map((part) => '${part[0].toUpperCase()}${part.substring(1)}')
+      .join(' ');
 }
 
 WorkOrder? _findOrder(String id, List<WorkOrder> orders) {
@@ -4267,7 +4541,65 @@ Map<String, Object> _mapField(Map<String, String> values) => {
   },
 };
 
-Future<File> _writeQrPdf(WorkOrder order) async {
+Future<File?> _saveQrPdfAs(WorkOrder order) async {
+  final path = await _pickQrPdfSavePath('${_safeQrFileId(order)}_site_qr.pdf');
+  if (path == null) return null;
+  final file = File(path);
+  await file.writeAsBytes(await _buildQrPdfBytes(order), flush: true);
+  return file;
+}
+
+Future<String?> _pickQrPdfSavePath(String suggestedName) async {
+  final script =
+      '''
+Add-Type -AssemblyName System.Windows.Forms
+\$dialog = New-Object System.Windows.Forms.SaveFileDialog
+\$dialog.Title = 'Save site QR PDF'
+\$dialog.Filter = 'PDF documents (*.pdf)|*.pdf'
+\$dialog.DefaultExt = 'pdf'
+\$dialog.AddExtension = \$true
+\$dialog.OverwritePrompt = \$true
+\$dialog.FileName = ${_powerShellLiteral(suggestedName)}
+if (\$dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+  Write-Output \$dialog.FileName
+}
+''';
+  final encoded = base64Encode(_utf16LeBytes(script));
+  final result = await Process.run('powershell.exe', [
+    '-NoProfile',
+    '-STA',
+    '-EncodedCommand',
+    encoded,
+  ]).timeout(const Duration(minutes: 2));
+
+  if (result.exitCode != 0) {
+    final detail = result.stderr.toString().trim();
+    throw ApiException(
+      detail.isEmpty
+          ? 'The save dialog could not be opened.'
+          : 'The save dialog could not be opened: $detail',
+    );
+  }
+
+  final path = result.stdout.toString().trim();
+  if (path.isEmpty) return null;
+  return path.toLowerCase().endsWith('.pdf') ? path : '$path.pdf';
+}
+
+Future<File> _writeQrPdfAttachment(WorkOrder order) async {
+  final temp = Directory.systemTemp;
+  final file = File(
+    '${temp.path}${Platform.pathSeparator}${_safeQrFileId(order)}_site_qr.pdf',
+  );
+  await file.writeAsBytes(await _buildQrPdfBytes(order), flush: true);
+  return file;
+}
+
+String _safeQrFileId(WorkOrder order) {
+  return order.id.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+}
+
+Future<List<int>> _buildQrPdfBytes(WorkOrder order) async {
   final logoBytes = (await rootBundle.load(
     'assets/logo1.png',
   )).buffer.asUint8List();
@@ -4331,15 +4663,7 @@ Future<File> _writeQrPdf(WorkOrder order) async {
     ),
   );
 
-  final home = Platform.environment['USERPROFILE'] ?? Directory.current.path;
-  final downloads = Directory('$home${Platform.pathSeparator}Downloads');
-  if (!await downloads.exists()) await downloads.create(recursive: true);
-  final safeId = order.id.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
-  final file = File(
-    '${downloads.path}${Platform.pathSeparator}${safeId}_site_qr.pdf',
-  );
-  await file.writeAsBytes(await document.save(), flush: true);
-  return file;
+  return document.save();
 }
 
 Future<void> _openOutlookDraftWithAttachment({

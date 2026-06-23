@@ -153,7 +153,7 @@ class _WorkOrdersViewState extends State<WorkOrdersView> {
       order.status,
       order.sla,
       order.supervisor ?? '',
-      order.assignedTo ?? '',
+      order.technicianLabel ?? '',
     ].any((value) => value.toLowerCase().contains(query));
   }
 

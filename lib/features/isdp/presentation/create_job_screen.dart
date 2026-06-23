@@ -6,7 +6,7 @@ import 'widgets/form_scaffold.dart';
 class CreateJobScreen extends StatefulWidget {
   const CreateJobScreen({super.key, this.onCreated, this.onCancel});
 
-  final ValueChanged<WorkOrder>? onCreated;
+  final Future<void> Function(WorkOrder)? onCreated;
   final VoidCallback? onCancel;
 
   @override
@@ -18,7 +18,9 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
   final _addressController = TextEditingController();
   final _scopeController = TextEditingController();
   late DateTime _dueAt = DateTime.now().add(const Duration(days: 1));
+  late final int _draftNumber = DateTime.now().microsecondsSinceEpoch;
   Priority _priority = Priority.high;
+  bool _creating = false;
 
   @override
   void dispose() {
@@ -137,15 +139,16 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
         ),
         FormActionBar(
           primaryIcon: Icons.add_task,
-          primaryLabel: 'Create Job',
-          onPrimary: _submit,
+          primaryLabel: _creating ? 'Creating...' : 'Create Job',
+          onPrimary: _creating ? null : _submit,
           onCancel: widget.onCancel,
         ),
       ],
     );
   }
 
-  void _submit() {
+  Future<void> _submit() async {
+    if (_creating) return;
     final site = _siteController.text.trim();
     final address = _addressController.text.trim();
     final scope = _scopeController.text.trim();
@@ -166,21 +169,25 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
       return;
     }
 
-    final nextNumber = DateTime.now().millisecondsSinceEpoch % 100000;
     final order = WorkOrder(
-      id: 'JOB-CMT-ESW-$nextNumber',
+      id: 'JOB-CMT-ESW-$_draftNumber',
       site: site,
       address: address,
       scope: scope,
       sla: _dueText(_dueAt),
-      siteCode: 'SITE-$nextNumber',
+      siteCode: 'SITE-$_draftNumber',
       status: 'Assigned to Supervisor',
       priority: _priority,
       dueAt: _dueAt,
     );
     final onCreated = widget.onCreated;
     if (onCreated != null) {
-      onCreated(order);
+      setState(() => _creating = true);
+      try {
+        await onCreated(order);
+      } finally {
+        if (mounted) setState(() => _creating = false);
+      }
     } else {
       Navigator.pop(context, order);
     }

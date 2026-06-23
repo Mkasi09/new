@@ -88,7 +88,8 @@ class FirebaseIsdpRepository implements IsdpRepository {
   Future<void> assignWorkOrder(WorkOrder order) {
     return _workOrders.doc(order.id).update({
       'status': 'Dispatched',
-      'assignedTo': order.assignedTo ?? _uid,
+      'assignedTo': order.technicianLabel ?? order.assignedTo ?? _uid,
+      'assignedTechnicians': order.assignedTechnicians,
       'updatedAt': FieldValue.serverTimestamp(),
       'history': FieldValue.arrayUnion([_historyEntry('assigned')]),
     });
@@ -169,6 +170,11 @@ class FirebaseIsdpRepository implements IsdpRepository {
   @override
   Future<void> approveWorkOrder(WorkOrder order) {
     return _updateStatus(order, 'Approved', sla: 'Approved');
+  }
+
+  @override
+  Future<void> deleteWorkOrder(WorkOrder order) {
+    return _workOrders.doc(order.id).delete();
   }
 
   Future<void> _updateStatus(WorkOrder order, String status, {String? sla}) {

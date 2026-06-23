@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/widgets/animated_logo_loader.dart';
+import '../../../core/support/support_contact.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../domain/auth_repository.dart';
@@ -42,12 +43,17 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
       await widget.authRepository.signOut();
     } on FirebaseAuthException catch (error) {
       setState(() {
-        _error = error.code == 'requires-recent-login'
+        final message = error.code == 'requires-recent-login'
             ? 'Your session expired. Sign in again with the temporary password.'
             : error.message ?? 'Could not change the password.';
+        _error = withSupportContact(message);
       });
     } catch (_) {
-      setState(() => _error = 'Could not change the password. Try again.');
+      setState(
+        () => _error = withSupportContact(
+          'Could not change the password. Try again.',
+        ),
+      );
     } finally {
       if (mounted) setState(() => _saving = false);
     }

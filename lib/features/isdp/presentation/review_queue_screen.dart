@@ -95,7 +95,7 @@ class _ReviewQueueCard extends StatelessWidget {
                           ),
                           const SizedBox(height: 3),
                           Text(
-                            '${order.id} - ${order.assignedTo ?? 'No technician'}',
+                            '${order.id} - ${order.technicianLabel ?? 'No technician'}',
                             style: const TextStyle(color: AppTheme.muted),
                           ),
                         ],

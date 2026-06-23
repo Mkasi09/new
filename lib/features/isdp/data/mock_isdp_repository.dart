@@ -53,4 +53,7 @@ class MockIsdpRepository implements IsdpRepository {
 
   @override
   Future<void> approveWorkOrder(WorkOrder order) async {}
+
+  @override
+  Future<void> deleteWorkOrder(WorkOrder order) async {}
 }

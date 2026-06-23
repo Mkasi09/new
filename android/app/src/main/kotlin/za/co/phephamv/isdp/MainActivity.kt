@@ -1,4 +1,4 @@
-package com.example.magzmotron
+package za.co.phephamv.isdp
 
 import io.flutter.embedding.android.FlutterActivity
 

@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/widgets/animated_logo_loader.dart';
+import '../../../core/support/support_contact.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../domain/auth_repository.dart';
@@ -21,6 +22,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
   bool _isLoading = false;
+  bool _isResettingPassword = false;
   String? _errorMessage;
 
   @override
@@ -44,7 +46,7 @@ class _LoginScreenState extends State<LoginScreen> {
         password: _passwordController.text,
       );
     } on FirebaseAuthException catch (error) {
-      setState(() => _errorMessage = _authMessage(error));
+      setState(() => _errorMessage = withSupportContact(_authMessage(error)));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -57,15 +59,54 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
+    setState(() {
+      _isResettingPassword = true;
+      _errorMessage = null;
+    });
+
     try {
       await widget.authRepository.sendPasswordResetEmail(email);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Password reset email sent.')),
-      );
+      await _showPasswordResetSent(email);
     } on FirebaseAuthException catch (error) {
-      setState(() => _errorMessage = _authMessage(error));
+      if (!mounted) return;
+      if (error.code == 'user-not-found' || error.code == 'invalid-email') {
+        await _showPasswordResetSent(email);
+      } else {
+        setState(
+          () => _errorMessage = withSupportContact(
+            'Could not send the password reset email.',
+          ),
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(
+        () => _errorMessage = withSupportContact(
+          'Could not send the password reset email.',
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isResettingPassword = false);
     }
+  }
+
+  Future<void> _showPasswordResetSent(String email) {
+    return showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Check your email'),
+        content: Text(
+          'If $email is registered for PHEPHA MV ISDP, a secure password reset link has been sent. Open the email and follow the link to create a new password.',
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Done'),
+          ),
+        ],
+      ),
+    );
   }
 
   String _authMessage(FirebaseAuthException error) {
@@ -222,8 +263,14 @@ class _LoginScreenState extends State<LoginScreen> {
                 label: Text(_isLoading ? 'Signing In' : 'Sign In'),
               ),
               TextButton(
-                onPressed: _isLoading ? null : _resetPassword,
-                child: const Text('Forgot password?'),
+                onPressed: _isLoading || _isResettingPassword
+                    ? null
+                    : _resetPassword,
+                child: Text(
+                  _isResettingPassword
+                      ? 'Sending reset email...'
+                      : 'Forgot password?',
+                ),
               ),
               if (_errorMessage != null) ...[
                 const SizedBox(height: 6),

@@ -1,8 +1,11 @@
-import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../app/theme/app_theme.dart';
+import '../../../core/support/support_contact.dart';
 import '../domain/entities.dart';
 import 'widgets/evidence_photo_thumbnail.dart';
 import 'widgets/form_scaffold.dart';
@@ -11,11 +14,15 @@ class UploadEvidenceScreen extends StatefulWidget {
   const UploadEvidenceScreen({
     super.key,
     required this.order,
+    this.targetSlot,
+    this.uploadPhoto,
     this.onCompleted,
     this.onCancel,
   });
 
   final WorkOrder order;
+  final String? targetSlot;
+  final EvidencePhotoUploader? uploadPhoto;
   final void Function(List<String>, Map<String, String>)? onCompleted;
   final VoidCallback? onCancel;
 
@@ -24,7 +31,7 @@ class UploadEvidenceScreen extends StatefulWidget {
 }
 
 class _UploadEvidenceScreenState extends State<UploadEvidenceScreen> {
-  static const _maxPhotoBytes = 300000;
+  static const _maxPhotoBytes = 700000;
   final Set<String> _uploadedSlots = {};
   final Map<String, String> _photoDataBySlot = {};
   final ImagePicker _picker = ImagePicker();
@@ -44,8 +51,16 @@ class _UploadEvidenceScreenState extends State<UploadEvidenceScreen> {
     ),
   ];
 
-  bool get _complete => _uploadedSlots.length == _slots.length;
-  bool get _canSave => _uploadedSlots.isNotEmpty;
+  List<_PhotoSlot> get _visibleSlots {
+    final targetSlot = widget.targetSlot;
+    if (targetSlot == null) return _slots;
+    return _slots.where((slot) => slot.keyName == targetSlot).toList();
+  }
+
+  bool get _complete =>
+      _visibleSlots.every((slot) => _uploadedSlots.contains(slot.keyName));
+  bool get _canSave =>
+      _visibleSlots.any((slot) => _uploadedSlots.contains(slot.keyName));
 
   @override
   void initState() {
@@ -56,6 +71,12 @@ class _UploadEvidenceScreenState extends State<UploadEvidenceScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final visibleSlots = _visibleSlots;
+    final uploadedVisible = visibleSlots
+        .where((slot) => _uploadedSlots.contains(slot.keyName))
+        .length;
+    final singleSlot = visibleSlots.length == 1 ? visibleSlots.first : null;
+
     return Column(
       children: [
         Expanded(
@@ -70,8 +91,9 @@ class _UploadEvidenceScreenState extends State<UploadEvidenceScreen> {
                     FormHeader(
                       icon: Icons.cloud_upload_outlined,
                       title: 'Upload Images',
-                      subtitle:
-                          '${widget.order.site} - capture before and after photos.',
+                      subtitle: singleSlot == null
+                          ? '${widget.order.site} - capture before and after photos.'
+                          : '${widget.order.site} - capture the ${singleSlot.keyName} photo.',
                     ),
                     const SizedBox(height: 14),
                     Card(
@@ -90,7 +112,7 @@ class _UploadEvidenceScreenState extends State<UploadEvidenceScreen> {
                             const SizedBox(width: 12),
                             Expanded(
                               child: Text(
-                                '${_uploadedSlots.length}/${_slots.length} evidence photos saved',
+                                '$uploadedVisible/${visibleSlots.length} evidence photos saved',
                                 style: const TextStyle(
                                   fontWeight: FontWeight.w900,
                                 ),
@@ -101,7 +123,7 @@ class _UploadEvidenceScreenState extends State<UploadEvidenceScreen> {
                       ),
                     ),
                     const SizedBox(height: 14),
-                    ..._slots.map(
+                    ...visibleSlots.map(
                       (slot) => _PhotoUploadTile(
                         slot: slot,
                         uploaded: _uploadedSlots.contains(slot.keyName),
@@ -149,37 +171,52 @@ class _UploadEvidenceScreenState extends State<UploadEvidenceScreen> {
     );
     if (source == null) return;
 
-    final image = await _picker.pickImage(
-      source: source,
-      maxWidth: 1024,
-      maxHeight: 1024,
-      imageQuality: 60,
-    );
-    if (image == null) return;
+    try {
+      final image = await _picker.pickImage(
+        source: source,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 60,
+      );
+      if (image == null) return;
 
-    final bytes = await image.readAsBytes();
-    if (bytes.length > _maxPhotoBytes) {
+      final bytes = await image.readAsBytes();
+      if (bytes.length > _maxPhotoBytes) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'This photo is too large. Choose a smaller image or use the camera.',
+            ),
+          ),
+        );
+        return;
+      }
+      final mimeType = image.mimeType ?? 'image/jpeg';
+      final uploader = widget.uploadPhoto ?? _uploadEvidencePhoto;
+      final photoData = await uploader(
+        order: widget.order,
+        slot: slot,
+        bytes: bytes,
+        contentType: mimeType,
+      );
+      if (!mounted) return;
+
+      setState(() {
+        _uploadedSlots.add(slot);
+        _photoDataBySlot[slot] = photoData;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Photo uploaded to Firebase Storage.')),
+      );
+    } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'This photo is too large. Choose a smaller image or use the camera.',
-          ),
+          content: Text('Could not upload photo. $supportContactMessage'),
         ),
       );
-      return;
     }
-    final mimeType = image.mimeType ?? 'image/jpeg';
-    final photoData = 'data:$mimeType;base64,${base64Encode(bytes)}';
-    if (!mounted) return;
-
-    setState(() {
-      _uploadedSlots.add(slot);
-      _photoDataBySlot[slot] = photoData;
-    });
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Photo added.')));
   }
 
   void _showMissing() {
@@ -204,6 +241,40 @@ class _UploadEvidenceScreenState extends State<UploadEvidenceScreen> {
         .map((slot) => slot.keyName)
         .toList();
   }
+}
+
+typedef EvidencePhotoUploader =
+    Future<String> Function({
+      required WorkOrder order,
+      required String slot,
+      required Uint8List bytes,
+      required String contentType,
+    });
+
+Future<String> _uploadEvidencePhoto({
+  required WorkOrder order,
+  required String slot,
+  required Uint8List bytes,
+  required String contentType,
+}) async {
+  final safeOrderId = _safeStorageSegment(order.id);
+  final safeSlot = _safeStorageSegment(slot);
+  final extension = contentType.contains('png') ? 'png' : 'jpg';
+  final ref = FirebaseStorage.instance.ref(
+    'evidence/$safeOrderId/$safeSlot.$extension',
+  );
+  await ref.putData(
+    bytes,
+    SettableMetadata(
+      contentType: contentType,
+      customMetadata: {'workOrderId': order.id, 'slot': slot},
+    ),
+  );
+  return ref.getDownloadURL();
+}
+
+String _safeStorageSegment(String value) {
+  return value.trim().replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
 }
 
 class _PhotoSlot {

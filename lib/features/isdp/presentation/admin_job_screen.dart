@@ -10,11 +10,13 @@ class AdminJobScreen extends StatelessWidget {
     super.key,
     required this.order,
     required this.onSendQr,
+    required this.onDelete,
     required this.onClose,
   });
 
   final WorkOrder order;
   final VoidCallback onSendQr;
+  final VoidCallback onDelete;
   final VoidCallback onClose;
 
   @override
@@ -36,6 +38,28 @@ class AdminJobScreen extends StatelessWidget {
             StatusChip(
               label: order.status,
               color: workOrderStatusColor(order.status),
+            ),
+            const SizedBox(width: 4),
+            PopupMenuButton<_AdminJobOption>(
+              tooltip: 'Options',
+              onSelected: (option) {
+                switch (option) {
+                  case _AdminJobOption.delete:
+                    onDelete();
+                }
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(
+                  value: _AdminJobOption.delete,
+                  child: Row(
+                    children: [
+                      Icon(Icons.delete_outline, color: AppTheme.danger),
+                      SizedBox(width: 10),
+                      Text('Delete job'),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -90,6 +114,8 @@ class AdminJobScreen extends StatelessWidget {
     );
   }
 }
+
+enum _AdminJobOption { delete }
 
 class _AdminEvidenceCard extends StatelessWidget {
   const _AdminEvidenceCard({

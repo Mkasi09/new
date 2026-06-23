@@ -206,8 +206,11 @@ class JobOverviewPanel extends StatelessWidget {
                   icon: Icons.supervisor_account_outlined,
                   label: order.supervisor!,
                 ),
-              if (order.assignedTo != null)
-                InfoChip(icon: Icons.person_outline, label: order.assignedTo!),
+              if (order.technicianLabel != null)
+                InfoChip(
+                  icon: Icons.person_outline,
+                  label: order.technicianLabel!,
+                ),
               if (_workDurationText(order) != null)
                 InfoChip(
                   icon: Icons.timer_outlined,
@@ -371,8 +374,11 @@ class WorkOrderCard extends StatelessWidget {
                   icon: Icons.supervisor_account_outlined,
                   label: order.supervisor!,
                 ),
-              if (order.assignedTo != null)
-                InfoChip(icon: Icons.person_outline, label: order.assignedTo!),
+              if (order.technicianLabel != null)
+                InfoChip(
+                  icon: Icons.person_outline,
+                  label: order.technicianLabel!,
+                ),
             ],
           ),
         ],

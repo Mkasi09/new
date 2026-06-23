@@ -6,6 +6,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import '../../../core/domain/app_role.dart';
+import '../../../core/support/support_contact.dart';
 import '../../auth/domain/auth_repository.dart';
 import '../data/mock_isdp_repository.dart';
 import '../domain/entities.dart';
@@ -70,6 +71,7 @@ class _IsdpShellState extends State<IsdpShell> {
   WorkOrder? _assigningOrder;
   WorkOrder? _scanningOrder;
   WorkOrder? _uploadingOrder;
+  String? _uploadingEvidenceSlot;
   WorkOrder? _completionOrder;
   WorkOrder? _reviewingOrder;
   WorkOrder? _supervisorOrder;
@@ -79,7 +81,16 @@ class _IsdpShellState extends State<IsdpShell> {
   Completer<List<String>?>? _uploadCompleter;
   final List<_AppNotification> _notifications = [];
   final Map<String, WorkOrder> _knownOrders = {};
+  final Set<String> _notificationKeys = {};
+  final Set<String> _pendingCreateIds = {};
+  List<AppUserProfile> _technicians = const [];
   bool _notificationsInitialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadTechnicians());
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -123,7 +134,21 @@ class _IsdpShellState extends State<IsdpShell> {
               if (workflowPage != null)
                 workflowPage
               else if (selectedOrder == null)
-                EmptyJobsView(role: _role, onCreateJob: _openCreateJobScreen)
+                EmptyJobsView(
+                  role: _role,
+                  onCreateJob: _openCreateJobScreen,
+                  onOpenReviewQueue: _role == AppRole.admin
+                      ? _openReviewQueueScreen
+                      : null,
+                  onOpenAnalytics: _role == AppRole.admin
+                      ? _openAnalyticsScreen
+                      : null,
+                  onAddUser: _role == AppRole.admin
+                      ? widget.authRepository == null
+                            ? null
+                            : _openAddUserScreen
+                      : null,
+                )
               else
                 DashboardView(
                   role: _role,
@@ -251,6 +276,7 @@ class _IsdpShellState extends State<IsdpShell> {
     _assigningOrder = null;
     _scanningOrder = null;
     _uploadingOrder = null;
+    _uploadingEvidenceSlot = null;
     _completionOrder = null;
     _reviewingOrder = null;
     _supervisorOrder = null;
@@ -306,7 +332,7 @@ class _IsdpShellState extends State<IsdpShell> {
         orders
             .where(
               (order) =>
-                  _matchesCurrentUser(order.assignedTo) &&
+                  _matchesCurrentTechnician(order) &&
                   (order.status == 'Dispatched' ||
                       order.status == 'On Site' ||
                       order.status == 'Submitted' ||
@@ -327,12 +353,89 @@ class _IsdpShellState extends State<IsdpShell> {
         normalized == profile.email.trim().toLowerCase();
   }
 
+  bool _matchesCurrentTechnician(WorkOrder order) {
+    final profile = widget.userProfile;
+    if (profile == null) return true;
+    final values = [
+      order.assignedTo,
+      ...order.assignedTechnicians,
+      ...order.technicianNames,
+    ];
+    return values.any((value) => _matchesCurrentUser(value));
+  }
+
+  Future<void> _loadTechnicians() async {
+    final authRepository = widget.authRepository;
+    if (authRepository == null) return;
+    try {
+      final users = await authRepository.listUsers();
+      if (!mounted) return;
+      setState(() {
+        _technicians = users
+            .where((user) => user.role == AppRole.technician)
+            .toList();
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _technicians = const []);
+    }
+  }
+
   List<WorkOrder> _mergeWorkOrders(List<WorkOrder> repositoryOrders) {
-    final ordersById = {
-      for (final order in _workOrders) order.id: order,
+    final localById = {for (final order in _workOrders) order.id: order};
+    final repositoryById = {
       for (final order in repositoryOrders) order.id: order,
     };
-    return ordersById.values.toList();
+    return {...localById.keys, ...repositoryById.keys}.map((id) {
+      final local = localById[id];
+      final remote = repositoryById[id];
+      if (local == null) return remote!;
+      if (remote == null) return local;
+      return _mergeWorkOrder(local: local, remote: remote);
+    }).toList();
+  }
+
+  WorkOrder _mergeWorkOrder({
+    required WorkOrder local,
+    required WorkOrder remote,
+  }) {
+    final evidenceSlots = {
+      ...remote.evidenceSlots,
+      ...local.evidenceSlots,
+    }.toList();
+    final hasLocalSubmit =
+        local.submittedAt != null && remote.submittedAt == null;
+
+    return remote.copyWith(
+      status: hasLocalSubmit ? local.status : remote.status,
+      sla: hasLocalSubmit ? local.sla : remote.sla,
+      submittedAt: remote.submittedAt ?? local.submittedAt,
+      arrivalVerified: remote.arrivalVerified || local.arrivalVerified,
+      evidenceUploaded: remote.evidenceUploaded || local.evidenceUploaded,
+      evidenceSlots: evidenceSlots,
+      evidencePhotos: {...remote.evidencePhotos, ...local.evidencePhotos},
+      technicianNotes: _preferSavedText(
+        remote.technicianNotes,
+        local.technicianNotes,
+      ),
+      issueReport: _preferSavedText(remote.issueReport, local.issueReport),
+      customerName: _preferSavedText(remote.customerName, local.customerName),
+      customerSignature: _preferSavedText(
+        remote.customerSignature,
+        local.customerSignature,
+      ),
+      assignedTechnicians: {
+        ...remote.assignedTechnicians,
+        ...local.assignedTechnicians,
+      }.toList(),
+      reviewed: hasLocalSubmit ? local.reviewed : remote.reviewed,
+    );
+  }
+
+  String? _preferSavedText(String? remote, String? local) {
+    if (remote?.trim().isNotEmpty == true) return remote;
+    if (local?.trim().isNotEmpty == true) return local;
+    return remote ?? local;
   }
 
   Widget? _buildWorkflowPage(List<WorkOrder> visibleOrders) {
@@ -359,11 +462,12 @@ class _IsdpShellState extends State<IsdpShell> {
       ),
       _WorkflowView.addUser when widget.authRepository != null => AddUserScreen(
         authRepository: widget.authRepository!,
-        onClose: _closeWorkflow,
+        onClose: _closeAddUserScreen,
       ),
       _WorkflowView.assignTechnician when _assigningOrder != null =>
         AssignTechnicianScreen(
           order: _assigningOrder!,
+          technicians: _technicians,
           onAssigned: _completeAssignment,
           onCancel: _closeWorkflow,
         ),
@@ -375,6 +479,7 @@ class _IsdpShellState extends State<IsdpShell> {
       _WorkflowView.uploadEvidence when _uploadingOrder != null =>
         UploadEvidenceScreen(
           order: _uploadingOrder!,
+          targetSlot: _uploadingEvidenceSlot,
           onCompleted: _completeUpload,
           onCancel: _cancelUpload,
         ),
@@ -415,6 +520,7 @@ class _IsdpShellState extends State<IsdpShell> {
     return AdminJobScreen(
       order: order,
       onSendQr: () => _sendQr(order),
+      onDelete: () => _confirmDeleteOrder(order),
       onClose: _closeAdminJob,
     );
   }
@@ -440,11 +546,17 @@ class _IsdpShellState extends State<IsdpShell> {
       _assigningOrder = null;
       _scanningOrder = null;
       _uploadingOrder = null;
+      _uploadingEvidenceSlot = null;
       _completionOrder = null;
       _reviewingOrder = null;
       _supervisorOrder = null;
       _returnToReviewQueue = false;
     });
+  }
+
+  void _closeAddUserScreen() {
+    _closeWorkflow();
+    unawaited(_loadTechnicians());
   }
 
   void _openOrder(WorkOrder order) {
@@ -473,6 +585,61 @@ class _IsdpShellState extends State<IsdpShell> {
 
   void _closeAdminJob() {
     setState(() => _adminOrder = null);
+  }
+
+  Future<void> _confirmDeleteOrder(WorkOrder order) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete job?'),
+        content: Text(
+          'Delete ${order.id} for ${order.site}? This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await _deleteOrder(order);
+  }
+
+  Future<void> _deleteOrder(WorkOrder order) async {
+    try {
+      await _repository.deleteWorkOrder(order);
+      if (!mounted) return;
+      _knownOrders.remove(order.id);
+      _notificationKeys.removeWhere((key) => key.startsWith('${order.id}:'));
+      setState(() {
+        _workOrders = _workOrders
+            .where((candidate) => candidate.id != order.id)
+            .toList();
+        _selectedOrderId = _selectedOrderId == order.id
+            ? null
+            : _selectedOrderId;
+        if (_adminOrder?.id == order.id) _adminOrder = null;
+        _notifications.removeWhere((item) => item.orderId == order.id);
+        _tab = 1;
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('${order.id} deleted.')));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not delete this job. $supportContactMessage'),
+        ),
+      );
+    }
   }
 
   Future<void> _sendQr(WorkOrder order) async {
@@ -514,6 +681,7 @@ class _IsdpShellState extends State<IsdpShell> {
   }
 
   void _replaceOrder(WorkOrder updated) {
+    _knownOrders[updated.id] = updated;
     setState(() {
       _workOrders = _workOrders
           .map((order) => order.id == updated.id ? updated : order)
@@ -625,31 +793,39 @@ class _IsdpShellState extends State<IsdpShell> {
   }
 
   Future<void> _createJob(WorkOrder created) async {
-    final saved = await _repository.createWorkOrder(created);
-    if (!mounted) return;
-    setState(() {
-      _workOrders = [saved, ..._workOrders];
-      _selectedOrderId = saved.id;
-      _workflowView = null;
-      _tab = 0;
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('${saved.id} created. QR value: ${saved.siteCode}'),
-        action: SnackBarAction(
-          label: 'Copy',
-          onPressed: () {
-            Clipboard.setData(ClipboardData(text: saved.siteCode));
-          },
+    if (!_pendingCreateIds.add(created.id)) return;
+
+    try {
+      final saved = await _repository.createWorkOrder(created);
+      if (!mounted) return;
+      _knownOrders[saved.id] = saved;
+      setState(() {
+        _workOrders = [
+          saved,
+          ..._workOrders.where((order) => order.id != saved.id),
+        ];
+        _selectedOrderId = saved.id;
+        _workflowView = null;
+        _tab = 0;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not create job. Check the network and retry. $supportContactMessage',
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      _pendingCreateIds.remove(created.id);
+    }
   }
 
   Future<void> _acceptOrder(WorkOrder order) async {
-    final supervisor = widget.userProfile?.email.isNotEmpty == true
-        ? widget.userProfile!.email
-        : widget.userProfile?.name ?? order.supervisor;
+    final supervisor = widget.userProfile?.name.trim().isNotEmpty == true
+        ? widget.userProfile!.name.trim()
+        : displayPersonName(order.supervisor);
     final accepted = order.copyWith(
       status: 'Accepted by Supervisor',
       supervisor: supervisor,
@@ -689,6 +865,8 @@ class _IsdpShellState extends State<IsdpShell> {
       return;
     }
 
+    await _loadTechnicians();
+    if (!mounted) return;
     setState(() {
       _workflowView = _WorkflowView.assignTechnician;
       _assigningOrder = order;
@@ -701,12 +879,14 @@ class _IsdpShellState extends State<IsdpShell> {
     });
   }
 
-  Future<void> _completeAssignment(String assignedTo) async {
+  Future<void> _completeAssignment(List<String> assignedTo) async {
     final order = _assigningOrder;
     if (order == null) return;
+    final names = assignedTo.map(displayPersonName).toSet().toList()..sort();
     final assigned = order.copyWith(
       status: 'Dispatched',
-      assignedTo: assignedTo,
+      assignedTo: names.join(', '),
+      assignedTechnicians: names,
     );
     await _repository.assignWorkOrder(assigned);
     _replaceOrder(assigned);
@@ -776,13 +956,14 @@ class _IsdpShellState extends State<IsdpShell> {
     });
   }
 
-  Future<List<String>?> _uploadEvidence(WorkOrder order) {
+  Future<List<String>?> _uploadEvidence(WorkOrder order, String? slot) {
     _uploadCompleter?.complete(null);
     final completer = Completer<List<String>?>();
     setState(() {
       _uploadCompleter = completer;
       _workflowView = _WorkflowView.uploadEvidence;
       _uploadingOrder = order;
+      _uploadingEvidenceSlot = slot;
       _assigningOrder = null;
       _scanningOrder = null;
       _reviewingOrder = null;
@@ -815,7 +996,11 @@ class _IsdpShellState extends State<IsdpShell> {
       } catch (_) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not save uploaded evidence.')),
+          const SnackBar(
+            content: Text(
+              'Could not save uploaded evidence. $supportContactMessage',
+            ),
+          ),
         );
         return;
       }
@@ -830,6 +1015,7 @@ class _IsdpShellState extends State<IsdpShell> {
       _uploadCompleter = null;
       _workflowView = null;
       _uploadingOrder = null;
+      _uploadingEvidenceSlot = null;
     });
   }
 
@@ -842,6 +1028,7 @@ class _IsdpShellState extends State<IsdpShell> {
       _uploadCompleter = null;
       _workflowView = null;
       _uploadingOrder = null;
+      _uploadingEvidenceSlot = null;
     });
   }
 
@@ -883,6 +1070,7 @@ class _IsdpShellState extends State<IsdpShell> {
       if (previous == null) {
         updates.add(
           _AppNotification(
+            key: '${order.id}:new',
             orderId: order.id,
             title: 'New work order',
             message: '${order.site} has been added to your queue.',
@@ -890,10 +1078,14 @@ class _IsdpShellState extends State<IsdpShell> {
             type: _NotificationType.assignment,
           ),
         );
-      } else if (previous.issueReport != order.issueReport &&
+        continue;
+      }
+
+      if (previous.issueReport != order.issueReport &&
           order.issueReport?.trim().isNotEmpty == true) {
         updates.add(
           _AppNotification(
+            key: '${order.id}:issue:${order.issueReport!.trim()}',
             orderId: order.id,
             title: 'Issue reported',
             message: '${order.site}: ${order.issueReport!.trim()}',
@@ -901,12 +1093,31 @@ class _IsdpShellState extends State<IsdpShell> {
             type: _NotificationType.issue,
           ),
         );
-      } else if (previous.status != order.status) {
+      }
+
+      if (previous.status != order.status) {
         updates.add(_statusNotification(order));
-      } else if (previous.customerSignature != order.customerSignature &&
+      }
+
+      if (previous.technicianLabel != order.technicianLabel &&
+          order.technicianLabel != null) {
+        updates.add(
+          _AppNotification(
+            key: '${order.id}:assigned:${order.technicianLabel}',
+            orderId: order.id,
+            title: 'Technician assigned',
+            message: '${order.site} assigned to ${order.technicianLabel}.',
+            createdAt: DateTime.now(),
+            type: _NotificationType.assignment,
+          ),
+        );
+      }
+
+      if (previous.customerSignature != order.customerSignature &&
           order.customerSignature?.isNotEmpty == true) {
         updates.add(
           _AppNotification(
+            key: '${order.id}:signoff',
             orderId: order.id,
             title: 'Customer sign-off captured',
             message: '${order.site} completion details are ready.',
@@ -922,10 +1133,18 @@ class _IsdpShellState extends State<IsdpShell> {
     if (updates.isEmpty) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      final uniqueUpdates = updates
+          .where((item) => _notificationKeys.add(item.key))
+          .toList();
+      if (uniqueUpdates.isEmpty) return;
       setState(() {
-        _notifications.insertAll(0, updates);
+        _notifications.insertAll(0, uniqueUpdates);
         if (_notifications.length > 30) {
+          final removed = _notifications.sublist(30);
           _notifications.removeRange(30, _notifications.length);
+          for (final item in removed) {
+            _notificationKeys.remove(item.key);
+          }
         }
       });
     });
@@ -1058,6 +1277,7 @@ class _IsdpShellState extends State<IsdpShell> {
       _ => 'Job status updated',
     };
     return _AppNotification(
+      key: '${order.id}:status:${order.status}',
       orderId: order.id,
       title: title,
       message: '${order.site} is now ${order.status.toLowerCase()}.',
@@ -1182,6 +1402,7 @@ enum _NotificationType { assignment, action, issue, progress, success, info }
 
 class _AppNotification {
   _AppNotification({
+    required this.key,
     required this.orderId,
     required this.title,
     required this.message,
@@ -1189,6 +1410,7 @@ class _AppNotification {
     required this.type,
   });
 
+  final String key;
   final String orderId;
   final String title;
   final String message;

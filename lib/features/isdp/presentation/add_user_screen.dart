@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/domain/app_role.dart';
+import '../../../core/support/support_contact.dart';
 import '../../auth/domain/auth_repository.dart';
 import 'widgets/form_scaffold.dart';
 
@@ -61,9 +62,11 @@ class _AddUserScreenState extends State<AddUserScreen> {
       await _showCreatedDialog();
       if (mounted) widget.onClose();
     } on FirebaseFunctionsException catch (error) {
-      _showError(error.message ?? 'Could not create the user.');
+      _showError(
+        withSupportContact(error.message ?? 'Could not create the user.'),
+      );
     } catch (_) {
-      _showError('Could not create the user. Try again.');
+      _showError(withSupportContact('Could not create the user. Try again.'));
     } finally {
       if (mounted) setState(() => _saving = false);
     }

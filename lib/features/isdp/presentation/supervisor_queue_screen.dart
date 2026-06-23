@@ -111,7 +111,7 @@ class _SupervisorQueueCard extends StatelessWidget {
                     InfoChip(icon: Icons.schedule_outlined, label: order.sla),
                     InfoChip(
                       icon: Icons.person_outline,
-                      label: order.assignedTo ?? 'No technician',
+                      label: order.technicianLabel ?? 'No technician',
                     ),
                     InfoChip(icon: Icons.place_outlined, label: order.address),
                   ],

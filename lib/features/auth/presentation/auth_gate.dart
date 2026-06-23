@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../../../core/notifications/notification_service.dart';
+import '../../../core/support/support_contact.dart';
 import '../../../core/widgets/splash_screen.dart';
 import '../../isdp/data/firebase_isdp_repository.dart';
 import '../../isdp/presentation/isdp_shell.dart';
@@ -40,6 +44,12 @@ class AuthGate extends StatelessWidget {
               return ChangePasswordScreen(authRepository: authRepository);
             }
 
+            unawaited(
+              NotificationService.registerCurrentDevice(
+                profileSnapshot.data!.uid,
+              ),
+            );
+
             return IsdpShell(
               initialRole: profileSnapshot.data!.role,
               userProfile: profileSnapshot.data,
@@ -77,7 +87,7 @@ class _ProfileLoadError extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'Check your connection or ask an administrator to verify your account record.',
+                  'Check your connection or ask an administrator to verify your account record. $supportContactMessage',
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 20),

@@ -1,7 +1,9 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { initializeApp } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
 const { FieldValue, getFirestore } = require("firebase-admin/firestore");
+const { getMessaging } = require("firebase-admin/messaging");
 
 initializeApp();
 
@@ -65,6 +67,263 @@ exports.createUser = onCall(async (request) => {
     throw new HttpsError("internal", "The user could not be created.");
   }
 });
+
+exports.sendTestNotification = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Sign in before testing notifications.");
+  }
+
+  const user = await getFirestore().collection("users").doc(request.auth.uid).get();
+  if (!user.exists) {
+    throw new HttpsError("not-found", "Your user profile was not found.");
+  }
+
+  const tokens = tokensForUsers([user]);
+  console.log("sendTestNotification", {
+    uid: request.auth.uid,
+    tokens: tokens.length,
+  });
+  if (tokens.length === 0) {
+    throw new HttpsError(
+      "failed-precondition",
+      "This phone is not registered for notifications yet.",
+    );
+  }
+
+  const result = await sendToTokens(tokens, {
+    notification: {
+      title: "PHEPHA MV ISDP",
+      body: "Test notification received. Phone alerts are working.",
+    },
+    data: {
+      type: "notification_test",
+      title: "PHEPHA MV ISDP",
+      body: "Test notification received. Phone alerts are working.",
+    },
+  });
+
+  return result;
+});
+
+exports.notifyWorkOrderUpdate = onDocumentWritten(
+  "work_orders/{orderId}",
+  async (event) => {
+    const before = event.data?.before.exists ? event.data.before.data() : null;
+    const after = event.data?.after.exists ? event.data.after.data() : null;
+    if (!after) return;
+
+    const notification = notificationForWorkOrder(event.params.orderId, before, after);
+    if (!notification) return;
+
+    const users = await getFirestore().collection("users").get();
+    const recipients = users.docs.filter((doc) =>
+      shouldNotifyUser(doc.id, doc.data(), notification.audience, after),
+    );
+    const tokens = tokensForUsers(recipients);
+    console.log("notifyWorkOrderUpdate", {
+      orderId: event.params.orderId,
+      type: notification.type,
+      audience: notification.audience,
+      recipients: recipients.length,
+      tokens: tokens.length,
+    });
+    if (tokens.length === 0) return;
+
+    const result = await sendToTokens(tokens, {
+      notification: {
+        title: notification.title,
+        body: notification.body,
+      },
+      data: {
+        workOrderId: event.params.orderId,
+        type: notification.type,
+        status: cleanString(after.status),
+      },
+    });
+    console.log("notifyWorkOrderUpdate sent", {
+      orderId: event.params.orderId,
+      successCount: result.successCount,
+      failureCount: result.failureCount,
+    });
+  },
+);
+
+function notificationForWorkOrder(orderId, before, after) {
+  const site = cleanString(after.site) || "A work order";
+  const status = cleanString(after.status);
+
+  if (!before) {
+    return {
+      audience: "supervisors",
+      type: "work_order_created",
+      title: "New work order",
+      body: `${site} has been added to the queue.`,
+    };
+  }
+
+  const beforeStatus = cleanString(before.status);
+  if (beforeStatus !== status) {
+    if (status === "Dispatched") {
+      return {
+        audience: "technicians",
+        type: "work_order_dispatched",
+        title: "Job dispatched",
+        body: `${site} has been assigned for field work.`,
+      };
+    }
+    if (status === "On Site") {
+      return {
+        audience: "supervisors",
+        type: "work_order_on_site",
+        title: "Arrival confirmed",
+        body: `${site} is now on site.`,
+      };
+    }
+    if (status === "Submitted") {
+      return {
+        audience: "admins",
+        type: "work_order_submitted",
+        title: "Job submitted",
+        body: `${site} is ready for admin review.`,
+      };
+    }
+    if (status === "Approved") {
+      return {
+        audience: "field_team",
+        type: "work_order_approved",
+        title: "Job approved",
+        body: `${site} has been approved.`,
+      };
+    }
+  }
+
+  if (assignedTechniciansChanged(before, after)) {
+    return {
+      audience: "technicians",
+      type: "work_order_assigned",
+      title: "Job assigned",
+      body: `${site} has been assigned to you.`,
+    };
+  }
+
+  if (cleanString(before.issueReport) !== cleanString(after.issueReport) &&
+      cleanString(after.issueReport)) {
+    return {
+      audience: "supervisors",
+      type: "issue_reported",
+      title: "Issue reported",
+      body: `${site}: ${cleanString(after.issueReport)}`,
+    };
+  }
+
+  if (evidenceChanged(before, after)) {
+    return {
+      audience: "supervisors",
+      type: "evidence_uploaded",
+      title: "Evidence uploaded",
+      body: `${site} has new evidence photos.`,
+    };
+  }
+
+  return null;
+}
+
+function shouldNotifyUser(uid, user, audience, order) {
+  const role = cleanString(user.role).toLowerCase();
+  if (audience === "admins") return role === "admin";
+  if (audience === "supervisors") {
+    return role === "admin" || role === "supervisor" || matchesPerson(uid, user, order.supervisor);
+  }
+  if (audience === "technicians") {
+    return role === "technician" && matchesAnyTechnician(uid, user, order);
+  }
+  if (audience === "field_team") {
+    return role === "admin" ||
+      matchesPerson(uid, user, order.supervisor) ||
+      matchesAnyTechnician(uid, user, order);
+  }
+  return false;
+}
+
+function matchesAnyTechnician(uid, user, order) {
+  const values = [
+    order.assignedTo,
+    ...(Array.isArray(order.assignedTechnicians) ? order.assignedTechnicians : []),
+  ];
+  return values.some((value) => matchesPerson(uid, user, value));
+}
+
+function matchesPerson(uid, user, value) {
+  const target = cleanString(value).toLowerCase();
+  if (!target) return false;
+  const candidates = [
+    uid,
+    user.uid,
+    user.name,
+    user.email,
+    displayNameFromEmail(user.email),
+  ].map((item) => cleanString(item).toLowerCase()).filter(Boolean);
+  return candidates.includes(target);
+}
+
+function tokensForUsers(users) {
+  const tokens = new Set();
+  for (const user of users) {
+    const data = user.data();
+    for (const token of Array.isArray(data.fcmTokens) ? data.fcmTokens : []) {
+      if (cleanString(token)) tokens.add(cleanString(token));
+    }
+    const tokenMap = data.notificationTokens || {};
+    for (const [token, enabled] of Object.entries(tokenMap)) {
+      if (enabled && token) tokens.add(token);
+    }
+    if (cleanString(data.lastNotificationToken)) {
+      tokens.add(cleanString(data.lastNotificationToken));
+    }
+  }
+  return Array.from(tokens);
+}
+
+async function sendToTokens(tokens, message) {
+  const messaging = getMessaging();
+  let successCount = 0;
+  let failureCount = 0;
+  for (let index = 0; index < tokens.length; index += 500) {
+    const batch = tokens.slice(index, index + 500);
+    const response = await messaging.sendEachForMulticast({ tokens: batch, ...message });
+    successCount += response.successCount;
+    failureCount += response.failureCount;
+    if (response.failureCount > 0) {
+      console.warn("FCM send failures", response.responses
+        .map((item, responseIndex) => ({ index: responseIndex, error: item.error?.message }))
+        .filter((item) => item.error));
+    }
+  }
+  return { successCount, failureCount };
+}
+
+function assignedTechniciansChanged(before, after) {
+  return JSON.stringify(before.assignedTechnicians || []) !==
+    JSON.stringify(after.assignedTechnicians || []) ||
+    cleanString(before.assignedTo) !== cleanString(after.assignedTo);
+}
+
+function evidenceChanged(before, after) {
+  return JSON.stringify(before.evidencePhotos || {}) !==
+    JSON.stringify(after.evidencePhotos || {}) ||
+    JSON.stringify(before.evidenceSlots || []) !==
+    JSON.stringify(after.evidenceSlots || []);
+}
+
+function displayNameFromEmail(email) {
+  const localPart = cleanString(email).split("@")[0];
+  if (!localPart) return "";
+  return localPart
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
 
 function cleanString(value) {
   return typeof value === "string" ? value.trim() : "";

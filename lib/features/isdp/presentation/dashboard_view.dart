@@ -45,7 +45,7 @@ class DashboardView extends StatefulWidget {
   final ValueChanged<WorkOrder> onOpenReviewOrder;
   final Future<void> Function(WorkOrder) onAssignOrder;
   final Future<bool?> Function(WorkOrder) onScanArrival;
-  final Future<List<String>?> Function(WorkOrder) onUploadEvidence;
+  final Future<List<String>?> Function(WorkOrder, String?) onUploadEvidence;
   final ValueChanged<WorkOrder> onOpenCompletionDetails;
   final Future<void> Function(WorkOrder) onSubmitCompletion;
 
@@ -144,8 +144,11 @@ class _DashboardViewState extends State<DashboardView> {
     );
   }
 
-  Future<void> _uploadImages(BuildContext context) async {
-    final evidenceSlots = await widget.onUploadEvidence(widget.selectedOrder);
+  Future<void> _uploadImages(BuildContext context, String slot) async {
+    final evidenceSlots = await widget.onUploadEvidence(
+      widget.selectedOrder,
+      slot,
+    );
 
     if (!context.mounted || evidenceSlots == null) return;
 
@@ -365,7 +368,7 @@ class _SupervisorHome extends StatelessWidget {
                     ),
                     InfoChip(
                       icon: Icons.person_outline,
-                      label: selectedOrder.assignedTo ?? 'No technician',
+                      label: selectedOrder.technicianLabel ?? 'No technician',
                     ),
                     InfoChip(
                       icon: Icons.schedule_outlined,
@@ -436,7 +439,7 @@ class _TechnicianHome extends StatelessWidget {
   final bool evidenceUploaded;
   final List<String> evidenceSlots;
   final ValueChanged<BuildContext> onScanSiteQr;
-  final ValueChanged<BuildContext> onUploadImages;
+  final void Function(BuildContext, String) onUploadImages;
   final ValueChanged<WorkOrder> onOpenOrder;
   final ValueChanged<WorkOrder> onOpenCompletionDetails;
   final Future<void> Function(WorkOrder) onSubmitCompletion;
@@ -475,8 +478,12 @@ class _TechnicianHome extends StatelessWidget {
           completionReady: completionReady,
           submitted: submitted,
           onScanSiteQr: arrivalVerified ? null : () => onScanSiteQr(context),
-          onUploadBefore: beforeUploaded ? null : () => onUploadImages(context),
-          onUploadAfter: afterUploaded ? null : () => onUploadImages(context),
+          onUploadBefore: beforeUploaded
+              ? null
+              : () => onUploadImages(context, 'before'),
+          onUploadAfter: afterUploaded
+              ? null
+              : () => onUploadImages(context, 'after'),
           onCompletionDetails: submitted
               ? null
               : () => onOpenCompletionDetails(order),
@@ -637,13 +644,6 @@ class _CountdownChip extends StatelessWidget {
       return InfoChip(icon: Icons.schedule_outlined, label: 'Due not set');
     }
 
-    if (!arrivalVerified) {
-      return InfoChip(
-        icon: Icons.qr_code_scanner,
-        label: 'Due ${_formatDateTime(dueAt)}',
-      );
-    }
-
     return StreamBuilder<int>(
       stream: Stream.periodic(const Duration(seconds: 1), (tick) => tick),
       builder: (context, snapshot) {
@@ -652,10 +652,16 @@ class _CountdownChip extends StatelessWidget {
         final displayDuration = late ? remaining.abs() : remaining;
 
         return InfoChip(
-          icon: late ? Icons.warning_amber_outlined : Icons.timer_outlined,
+          icon: late
+              ? Icons.warning_amber_outlined
+              : arrivalVerified
+              ? Icons.timer_outlined
+              : Icons.qr_code_scanner,
           label: late
               ? 'Late ${_formatLongDuration(displayDuration)}'
-              : 'Time left ${_formatClock(displayDuration)}',
+              : arrivalVerified
+              ? 'Time left ${_formatClock(displayDuration)}'
+              : 'Due in ${_formatDueCountdown(displayDuration)}',
         );
       },
     );
@@ -681,9 +687,21 @@ String _formatLongDuration(Duration duration) {
   return '${_twoDigits(hours)}:${_twoDigits(minutes)}:${_twoDigits(seconds)}';
 }
 
-String _formatDateTime(DateTime value) {
-  return '${value.year}-${_twoDigits(value.month)}-${_twoDigits(value.day)} '
-      '${_twoDigits(value.hour)}:${_twoDigits(value.minute)}';
+String _formatDueCountdown(Duration duration) {
+  final days = duration.inDays;
+  final hours = duration.inHours.remainder(24);
+  final minutes = duration.inMinutes.remainder(60);
+  final seconds = duration.inSeconds.remainder(60);
+  final parts = <String>[];
+
+  if (days > 0) parts.add(days == 1 ? '1 day' : '$days days');
+  if (hours > 0) parts.add(hours == 1 ? '1 hour' : '$hours hours');
+  if (minutes > 0) parts.add(minutes == 1 ? '1 min' : '$minutes mins');
+  if (parts.isEmpty) {
+    parts.add(seconds == 1 ? '1 sec' : '$seconds secs');
+  }
+
+  return parts.join(' ');
 }
 
 String _twoDigits(int value) {

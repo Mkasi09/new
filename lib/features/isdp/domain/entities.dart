@@ -46,6 +46,7 @@ class WorkOrder {
     this.reviewedAt,
     this.supervisor,
     this.assignedTo,
+    this.assignedTechnicians = const [],
     this.createdBy,
   });
 
@@ -72,6 +73,7 @@ class WorkOrder {
   final DateTime? reviewedAt;
   final String? supervisor;
   final String? assignedTo;
+  final List<String> assignedTechnicians;
   final String? createdBy;
 
   WorkOrder copyWith({
@@ -98,6 +100,7 @@ class WorkOrder {
     DateTime? reviewedAt,
     String? supervisor,
     String? assignedTo,
+    List<String>? assignedTechnicians,
     String? createdBy,
   }) {
     return WorkOrder(
@@ -124,8 +127,28 @@ class WorkOrder {
       reviewedAt: reviewedAt ?? this.reviewedAt,
       supervisor: supervisor ?? this.supervisor,
       assignedTo: assignedTo ?? this.assignedTo,
+      assignedTechnicians: assignedTechnicians ?? this.assignedTechnicians,
       createdBy: createdBy ?? this.createdBy,
     );
+  }
+
+  List<String> get technicianNames {
+    if (assignedTechnicians.isNotEmpty) {
+      return assignedTechnicians.map(displayPersonName).toList();
+    }
+    final assigned = assignedTo?.trim();
+    if (assigned == null || assigned.isEmpty) return const [];
+    return assigned
+        .split(RegExp(r'[,;]'))
+        .map(displayPersonName)
+        .where((name) => name.isNotEmpty)
+        .toList();
+  }
+
+  String? get technicianLabel {
+    final names = technicianNames;
+    if (names.isEmpty) return null;
+    return names.join(', ');
   }
 
   Map<String, Object?> toMap() {
@@ -152,6 +175,7 @@ class WorkOrder {
       'reviewedAt': reviewedAt?.toIso8601String(),
       'supervisor': supervisor,
       'assignedTo': assignedTo,
+      'assignedTechnicians': assignedTechnicians,
       'createdBy': createdBy,
     };
   }
@@ -189,11 +213,31 @@ class WorkOrder {
       customerSignature: map['customerSignature'] as String?,
       reviewed: map['reviewed'] as bool? ?? false,
       reviewedAt: _dateTimeFromMapValue(map['reviewedAt']),
-      supervisor: map['supervisor'] as String?,
+      supervisor: displayPersonName(map['supervisor'] as String?),
       assignedTo: map['assignedTo'] as String?,
+      assignedTechnicians:
+          (map['assignedTechnicians'] as List<dynamic>?)
+              ?.whereType<String>()
+              .map(displayPersonName)
+              .where((name) => name.isNotEmpty)
+              .toList() ??
+          const [],
       createdBy: map['createdBy'] as String?,
     );
   }
+}
+
+String displayPersonName(String? value) {
+  final raw = value?.trim();
+  if (raw == null || raw.isEmpty) return '';
+  if (!raw.contains('@')) return raw;
+  final localPart = raw.split('@').first.trim();
+  if (localPart.isEmpty) return raw;
+  return localPart
+      .split(RegExp(r'[._-]+'))
+      .where((part) => part.isNotEmpty)
+      .map((part) => '${part[0].toUpperCase()}${part.substring(1)}')
+      .join(' ');
 }
 
 DateTime? _dateTimeFromMapValue(Object? value) {

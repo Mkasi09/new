@@ -21,6 +21,7 @@ class EvidencePhotoThumbnail extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = complete ? AppTheme.success : AppTheme.warning;
     final bytes = _tryDecodePhoto(photoData);
+    final url = _tryPhotoUrl(photoData);
 
     return Container(
       width: size,
@@ -32,12 +33,19 @@ class EvidencePhotoThumbnail extends StatelessWidget {
         border: Border.all(color: color.withValues(alpha: 0.18)),
       ),
       child: bytes == null
-          ? Icon(
-              complete
-                  ? Icons.check_circle_outline
-                  : Icons.image_not_supported_outlined,
-              color: color,
-            )
+          ? url == null
+                ? Icon(
+                    complete
+                        ? Icons.check_circle_outline
+                        : Icons.image_not_supported_outlined,
+                    color: color,
+                  )
+                : Image.network(
+                    url,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) =>
+                        Icon(Icons.image_not_supported_outlined, color: color),
+                  )
           : Image.memory(bytes, fit: BoxFit.cover),
     );
   }
@@ -60,17 +68,18 @@ class EvidencePhotoViewer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bytes = _tryDecodePhoto(photoData);
+    final url = _tryPhotoUrl(photoData);
     final thumbnail = EvidencePhotoThumbnail(
       photoData: photoData,
       complete: complete,
       size: size,
     );
 
-    if (bytes == null) return thumbnail;
+    if (bytes == null && url == null) return thumbnail;
 
     return InkWell(
       borderRadius: BorderRadius.circular(8),
-      onTap: () => _openFullScreen(context, bytes),
+      onTap: () => _openFullScreen(context, bytes: bytes, url: url),
       child: Stack(
         children: [
           thumbnail,
@@ -95,7 +104,7 @@ class EvidencePhotoViewer extends StatelessWidget {
     );
   }
 
-  void _openFullScreen(BuildContext context, Uint8List bytes) {
+  void _openFullScreen(BuildContext context, {Uint8List? bytes, String? url}) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         fullscreenDialog: true,
@@ -111,7 +120,9 @@ class EvidencePhotoViewer extends StatelessWidget {
               child: InteractiveViewer(
                 minScale: 0.8,
                 maxScale: 5,
-                child: Image.memory(bytes, fit: BoxFit.contain),
+                child: bytes != null
+                    ? Image.memory(bytes, fit: BoxFit.contain)
+                    : Image.network(url!, fit: BoxFit.contain),
               ),
             ),
           ),
@@ -119,6 +130,14 @@ class EvidencePhotoViewer extends StatelessWidget {
       ),
     );
   }
+}
+
+String? _tryPhotoUrl(String? photoData) {
+  if (photoData == null || photoData.isEmpty) return null;
+  final uri = Uri.tryParse(photoData);
+  if (uri == null || !uri.hasScheme) return null;
+  if (uri.scheme != 'http' && uri.scheme != 'https') return null;
+  return photoData;
 }
 
 Uint8List? _tryDecodePhoto(String? photoData) {

@@ -36,4 +36,6 @@ abstract class IsdpRepository {
   Future<void> reviewWorkOrder(WorkOrder order);
 
   Future<void> approveWorkOrder(WorkOrder order);
+
+  Future<void> deleteWorkOrder(WorkOrder order);
 }

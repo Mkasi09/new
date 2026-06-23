@@ -1,9 +1,17 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
 import 'package:isdp_admin_desktop/main.dart';
 
 class FakeAdminRepository implements AdminRepository {
+  final deletedIds = <String>[];
+  WorkOrder? updatedOrder;
+  String? updatedAction;
+
   @override
   Future<AuthSession> signIn({
     required String email,
@@ -39,7 +47,61 @@ class FakeAdminRepository implements AdminRepository {
               'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL7WQAAAABJRU5ErkJggg==',
         },
       ),
+      WorkOrder(
+        id: 'JOB-CMT-ESW-101',
+        site: 'Ezulwini Approved',
+        address: 'Valley Road',
+        scope: 'Completed router install',
+        sla: 'Approved',
+        siteCode: 'SITE-101',
+        status: 'Approved',
+        priority: Priority.low,
+        dueAt: DateTime.now().add(const Duration(hours: 4)),
+        supervisor: 'Mandla Dlamini',
+        assignedTo: 'Thabo M.',
+        arrivalVerified: true,
+        evidenceUploaded: true,
+      ),
+      WorkOrder(
+        id: 'JOB-CMT-ESW-102',
+        site: 'Manzini Dispatch',
+        address: 'Industrial Road',
+        scope: 'New ONT install',
+        sla: 'Due in 24 hours',
+        siteCode: 'SITE-102',
+        status: 'Accepted by Supervisor',
+        priority: Priority.high,
+        dueAt: DateTime.now().add(const Duration(hours: 24)),
+        supervisor: 'Mandla Dlamini',
+      ),
     ];
+  }
+
+  @override
+  Future<List<AdminUserProfile>> fetchTechnicians(AuthSession session) async {
+    return const [
+      AdminUserProfile(
+        uid: 'tech-1',
+        email: 'sibusiso@commit.co.sz',
+        name: 'Sibusiso M.',
+        role: 'technician',
+        team: 'Field Team A',
+      ),
+      AdminUserProfile(
+        uid: 'tech-2',
+        email: 'thabo.tech@commit.co.sz',
+        name: 'Thabo M.',
+        role: 'technician',
+        team: 'Field Team B',
+      ),
+      AdminUserProfile(
+        uid: 'supervisor-1',
+        email: 'mandla@commit.co.sz',
+        name: 'Mandla Dlamini',
+        role: 'supervisor',
+        team: 'North Region',
+      ),
+    ].where((user) => user.role == 'technician').toList();
   }
 
   @override
@@ -50,7 +112,15 @@ class FakeAdminRepository implements AdminRepository {
     AuthSession session,
     WorkOrder order, {
     required String action,
-  }) async {}
+  }) async {
+    updatedOrder = order;
+    updatedAction = action;
+  }
+
+  @override
+  Future<void> deleteWorkOrder(AuthSession session, WorkOrder order) async {
+    deletedIds.add(order.id);
+  }
 }
 
 void main() {
@@ -95,6 +165,202 @@ void main() {
     expect(order.customerName, 'Jane Customer');
   });
 
+  test('work order reads assigned technicians from Firestore', () {
+    final order = WorkOrder.fromFirestoreDocument({
+      'name': 'projects/demo/databases/(default)/documents/work_orders/JOB-1',
+      'fields': {
+        'assignedTo': {'stringValue': 'fallback@example.com'},
+        'assignedTechnicians': {
+          'arrayValue': {
+            'values': [
+              {'stringValue': 'sibusiso@commit.co.sz'},
+              {'stringValue': 'Thabo M.'},
+            ],
+          },
+        },
+      },
+    });
+
+    expect(order.technicianNames, ['Sibusiso', 'Thabo M.']);
+    expect(order.technicianLabel, 'Sibusiso, Thabo M.');
+  });
+
+  test(
+    'admin repository fetches every work order page without createdAt filter',
+    () async {
+      final requestedUris = <Uri>[];
+      final repository = RestAdminRepository(
+        client: MockClient((request) async {
+          requestedUris.add(request.url);
+          expect(request.url.queryParameters.containsKey('orderBy'), isFalse);
+          expect(request.url.queryParameters['pageSize'], '100');
+
+          if (request.url.queryParameters['pageToken'] == 'second') {
+            return http.Response('''
+{
+  "documents": [
+    {
+      "name": "projects/demo/databases/(default)/documents/work_orders/JOB-2",
+      "fields": {
+        "site": {"stringValue": "Second page site"},
+        "status": {"stringValue": "New"}
+      }
+    }
+  ]
+}
+''', 200);
+          }
+
+          return http.Response('''
+{
+  "documents": [
+    {
+      "name": "projects/demo/databases/(default)/documents/work_orders/JOB-1",
+      "fields": {
+        "site": {"stringValue": "First page site"},
+        "status": {"stringValue": "New"}
+      }
+    }
+  ],
+  "nextPageToken": "second"
+}
+''', 200);
+        }),
+      );
+
+      final orders = await repository.fetchWorkOrders(
+        const AuthSession(
+          idToken: 'token',
+          email: 'admin@test.com',
+          uid: 'admin',
+        ),
+      );
+
+      expect(orders.map((order) => order.id), ['JOB-1', 'JOB-2']);
+      expect(requestedUris, hasLength(2));
+      expect(requestedUris.last.queryParameters['pageToken'], 'second');
+    },
+  );
+
+  test('admin repository deletes a work order document', () async {
+    Uri? requestedUri;
+    String? method;
+    final repository = RestAdminRepository(
+      client: MockClient((request) async {
+        requestedUri = request.url;
+        method = request.method;
+        return http.Response('{}', 200);
+      }),
+    );
+
+    await repository.deleteWorkOrder(
+      const AuthSession(
+        idToken: 'token',
+        email: 'admin@test.com',
+        uid: 'admin',
+      ),
+      const WorkOrder(
+        id: 'JOB-DELETE',
+        site: 'Delete',
+        address: 'Address',
+        scope: 'Scope',
+        sla: 'Due today',
+        siteCode: 'SITE-DELETE',
+        status: 'New',
+        priority: Priority.high,
+      ),
+    );
+
+    expect(method, 'DELETE');
+    expect(requestedUri!.path, contains('/work_orders/JOB-DELETE'));
+  });
+
+  test('admin repository fetches technician users only', () async {
+    final repository = RestAdminRepository(
+      client: MockClient((request) async {
+        expect(request.url.path, contains('/documents/users'));
+        return http.Response('''
+{
+  "documents": [
+    {
+      "name": "projects/demo/databases/(default)/documents/users/tech-1",
+      "fields": {
+        "email": {"stringValue": "sibusiso@commit.co.sz"},
+        "name": {"stringValue": "Sibusiso M."},
+        "role": {"stringValue": "technician"},
+        "team": {"stringValue": "Field Team A"}
+      }
+    },
+    {
+      "name": "projects/demo/databases/(default)/documents/users/admin-1",
+      "fields": {
+        "email": {"stringValue": "admin@commit.co.sz"},
+        "name": {"stringValue": "Admin User"},
+        "role": {"stringValue": "admin"}
+      }
+    }
+  ]
+}
+''', 200);
+      }),
+    );
+
+    final technicians = await repository.fetchTechnicians(
+      const AuthSession(
+        idToken: 'token',
+        email: 'admin@test.com',
+        uid: 'admin',
+      ),
+    );
+
+    expect(technicians.map((user) => user.name), ['Sibusiso M.']);
+  });
+
+  test('admin repository writes assigned technicians to Firestore', () async {
+    Map<String, dynamic>? payload;
+    Uri? requestedUri;
+    final repository = RestAdminRepository(
+      client: MockClient((request) async {
+        requestedUri = request.url;
+        payload = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response('{}', 200);
+      }),
+    );
+
+    await repository.updateWorkOrder(
+      const AuthSession(
+        idToken: 'token',
+        email: 'admin@test.com',
+        uid: 'admin',
+      ),
+      const WorkOrder(
+        id: 'JOB-ASSIGN',
+        site: 'Assign',
+        address: 'Address',
+        scope: 'Scope',
+        sla: 'Due today',
+        siteCode: 'SITE-ASSIGN',
+        status: 'Dispatched',
+        priority: Priority.high,
+        assignedTo: 'Sibusiso M., Thabo M.',
+        assignedTechnicians: ['Sibusiso M.', 'Thabo M.'],
+      ),
+      action: 'assigned',
+    );
+
+    final fields = payload!['fields'] as Map<String, dynamic>;
+    final values =
+        fields['assignedTechnicians']['arrayValue']['values'] as List<dynamic>;
+    expect(values.map((value) => value['stringValue']), [
+      'Sibusiso M.',
+      'Thabo M.',
+    ]);
+    expect(
+      requestedUri!.queryParametersAll['updateMask.fieldPaths'],
+      contains('assignedTechnicians'),
+    );
+  });
+
   testWidgets('admin dashboard smoke test', (WidgetTester tester) async {
     tester.view.physicalSize = const Size(1280, 800);
     tester.view.devicePixelRatio = 1;
@@ -110,6 +376,7 @@ void main() {
 
     expect(find.text('Dashboard'), findsNWidgets(2));
     expect(find.text('Operational Queue'), findsOneWidget);
+    expect(find.text('Materials'), findsNothing);
     expect(find.byIcon(Icons.dashboard_outlined), findsWidgets);
   });
 
@@ -129,7 +396,15 @@ void main() {
 
     await tester.tap(find.text('Open jobs'));
     await tester.pumpAndSettle();
+    expect(find.text('2 jobs found'), findsOneWidget);
+
+    await tester.tap(find.text('Dashboard').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Due soon'));
+    await tester.pumpAndSettle();
     expect(find.text('1 job found'), findsOneWidget);
+    expect(find.text('JOB-CMT-ESW-100 - Mbabane Central'), findsOneWidget);
+    expect(find.text('JOB-CMT-ESW-101 - Ezulwini Approved'), findsNothing);
 
     await tester.tap(find.text('JOB-CMT-ESW-100 - Mbabane Central'));
     await tester.pumpAndSettle();
@@ -164,5 +439,75 @@ void main() {
     await tester.tap(find.text('Back to jobs'));
     await tester.pumpAndSettle();
     expect(find.text('Search jobs'), findsOneWidget);
+  });
+
+  testWidgets('desktop admin can delete a job from details', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = FakeAdminRepository();
+
+    await tester.pumpWidget(IsdpAdminApp(repository: repository));
+    await tester.enterText(find.byType(TextFormField).first, 'admin@test.com');
+    await tester.enterText(find.byType(TextFormField).last, 'password');
+    await tester.tap(find.text('Sign in'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Open jobs'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('JOB-CMT-ESW-100 - Mbabane Central'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Delete'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+    await tester.pumpAndSettle();
+
+    expect(repository.deletedIds, ['JOB-CMT-ESW-100']);
+  });
+
+  testWidgets('desktop admin assigns technicians from the user directory', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = FakeAdminRepository();
+
+    await tester.pumpWidget(IsdpAdminApp(repository: repository));
+    await tester.enterText(find.byType(TextFormField).first, 'admin@test.com');
+    await tester.enterText(find.byType(TextFormField).last, 'password');
+    await tester.tap(find.text('Sign in'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Field teams'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Assign').first);
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Search technicians'),
+      'thabo.tech',
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(CheckboxListTile, 'Thabo M.'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Clear search'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(CheckboxListTile, 'Sibusiso M.'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Assign 2'));
+    await tester.pumpAndSettle();
+
+    expect(repository.updatedOrder?.id, 'JOB-CMT-ESW-102');
+    expect(repository.updatedOrder?.assignedTechnicians, [
+      'Sibusiso M.',
+      'Thabo M.',
+    ]);
+    expect(repository.updatedOrder?.assignedTo, 'Sibusiso M., Thabo M.');
+    expect(repository.updatedAction, 'assigned to Sibusiso M., Thabo M.');
   });
 }

@@ -196,12 +196,12 @@ class _SupervisorProgress extends StatelessWidget {
                   label: 'Accepted',
                   complete:
                       order.status != 'Assigned to Supervisor' ||
-                      order.assignedTo != null,
+                      order.technicianLabel != null,
                 ),
                 _ProgressChip(
                   icon: Icons.person_outline,
                   label: 'Assigned',
-                  complete: order.assignedTo != null,
+                  complete: order.technicianLabel != null,
                 ),
                 _ProgressChip(
                   icon: Icons.qr_code_scanner,
@@ -257,7 +257,7 @@ class _SupervisorProgress extends StatelessWidget {
     if (order.arrivalVerified) {
       return 'Arrival confirmed. Waiting for evidence upload.';
     }
-    if (order.assignedTo != null) {
+    if (order.technicianLabel != null) {
       return 'Technician assigned. Waiting for arrival scan.';
     }
     return 'Accept the job, then assign a technician.';
