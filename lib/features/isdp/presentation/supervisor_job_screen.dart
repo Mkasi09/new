@@ -11,12 +11,16 @@ class SupervisorJobScreen extends StatelessWidget {
     required this.order,
     required this.onAccept,
     required this.onAssign,
+    required this.onOpenChat,
+    required this.unreadChatStream,
     required this.onClose,
   });
 
   final WorkOrder order;
   final VoidCallback onAccept;
   final VoidCallback onAssign;
+  final VoidCallback onOpenChat;
+  final Stream<int> unreadChatStream;
   final VoidCallback onClose;
 
   @override
@@ -42,6 +46,15 @@ class SupervisorJobScreen extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         JobOverviewPanel(order: order),
+        const SizedBox(height: 14),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: onOpenChat,
+            icon: const Icon(Icons.forum_outlined),
+            label: _UnreadChatLabel(stream: unreadChatStream),
+          ),
+        ),
         const SizedBox(height: 14),
         _SupervisorProgress(order: order),
         const SizedBox(height: 14),
@@ -69,6 +82,32 @@ class SupervisorJobScreen extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _UnreadChatLabel extends StatelessWidget {
+  const _UnreadChatLabel({required this.stream});
+
+  final Stream<int> stream;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<int>(
+      stream: stream,
+      initialData: 0,
+      builder: (context, snapshot) {
+        final count = snapshot.data ?? 0;
+        if (count == 0) return const Text('Job Chat');
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Job Chat'),
+            const SizedBox(width: 8),
+            UnreadCountBadge(count: count),
+          ],
+        );
+      },
     );
   }
 }

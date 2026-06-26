@@ -10,12 +10,16 @@ class AdminJobScreen extends StatelessWidget {
     super.key,
     required this.order,
     required this.onSendQr,
+    required this.onOpenChat,
+    required this.unreadChatStream,
     required this.onDelete,
     required this.onClose,
   });
 
   final WorkOrder order;
   final VoidCallback onSendQr;
+  final VoidCallback onOpenChat;
+  final Stream<int> unreadChatStream;
   final VoidCallback onDelete;
   final VoidCallback onClose;
 
@@ -65,6 +69,15 @@ class AdminJobScreen extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         JobOverviewPanel(order: order),
+        const SizedBox(height: 14),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: onOpenChat,
+            icon: const Icon(Icons.forum_outlined),
+            label: _UnreadChatLabel(stream: unreadChatStream),
+          ),
+        ),
         const SizedBox(height: 14),
         WorkDurationPanel(order: order),
         const SizedBox(height: 14),
@@ -116,6 +129,32 @@ class AdminJobScreen extends StatelessWidget {
 }
 
 enum _AdminJobOption { delete }
+
+class _UnreadChatLabel extends StatelessWidget {
+  const _UnreadChatLabel({required this.stream});
+
+  final Stream<int> stream;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<int>(
+      stream: stream,
+      initialData: 0,
+      builder: (context, snapshot) {
+        final count = snapshot.data ?? 0;
+        if (count == 0) return const Text('Job Chat');
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Job Chat'),
+            const SizedBox(width: 8),
+            UnreadCountBadge(count: count),
+          ],
+        );
+      },
+    );
+  }
+}
 
 class _AdminEvidenceCard extends StatelessWidget {
   const _AdminEvidenceCard({

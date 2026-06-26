@@ -489,6 +489,28 @@ class _TestIsdpRepository implements IsdpRepository {
 
   @override
   Future<void> deleteWorkOrder(WorkOrder order) async {}
+
+  @override
+  Stream<List<JobChatMessage>> watchJobMessages(String workOrderId) =>
+      Stream.value(const []);
+
+  @override
+  Future<void> sendJobMessage({
+    required String workOrderId,
+    required String message,
+    required String senderName,
+    required String senderRole,
+  }) async {}
+
+  @override
+  Stream<int> watchUnreadJobMessageCount(String workOrderId) => Stream.value(0);
+
+  @override
+  Stream<int> watchUnreadJobMessageTotal(List<String> workOrderIds) =>
+      Stream.value(0);
+
+  @override
+  Future<void> markJobChatRead(String workOrderId) async {}
 }
 
 final _futureDueAt = DateTime.now().add(const Duration(hours: 11));
@@ -568,6 +590,28 @@ class _EmptyIsdpRepository implements IsdpRepository {
 
   @override
   Future<void> submitCompletion(WorkOrder order) async {}
+
+  @override
+  Stream<List<JobChatMessage>> watchJobMessages(String workOrderId) =>
+      Stream.value(const []);
+
+  @override
+  Future<void> sendJobMessage({
+    required String workOrderId,
+    required String message,
+    required String senderName,
+    required String senderRole,
+  }) async {}
+
+  @override
+  Stream<int> watchUnreadJobMessageCount(String workOrderId) => Stream.value(0);
+
+  @override
+  Stream<int> watchUnreadJobMessageTotal(List<String> workOrderIds) =>
+      Stream.value(0);
+
+  @override
+  Future<void> markJobChatRead(String workOrderId) async {}
 
   @override
   Future<void> reviewWorkOrder(WorkOrder order) async {}
@@ -736,4 +780,26 @@ class _CompletableIsdpRepository implements IsdpRepository {
 
   @override
   Future<void> deleteWorkOrder(WorkOrder order) async {}
+
+  @override
+  Stream<List<JobChatMessage>> watchJobMessages(String workOrderId) =>
+      Stream.value(const []);
+
+  @override
+  Future<void> sendJobMessage({
+    required String workOrderId,
+    required String message,
+    required String senderName,
+    required String senderRole,
+  }) async {}
+
+  @override
+  Stream<int> watchUnreadJobMessageCount(String workOrderId) => Stream.value(0);
+
+  @override
+  Stream<int> watchUnreadJobMessageTotal(List<String> workOrderIds) =>
+      Stream.value(0);
+
+  @override
+  Future<void> markJobChatRead(String workOrderId) async {}
 }

@@ -48,6 +48,10 @@ class WorkOrder {
     this.assignedTo,
     this.assignedTechnicians = const [],
     this.createdBy,
+    this.lastMessage,
+    this.lastMessageAt,
+    this.lastMessageBy,
+    this.chatMessageCount = 0,
   });
 
   final String id;
@@ -75,6 +79,10 @@ class WorkOrder {
   final String? assignedTo;
   final List<String> assignedTechnicians;
   final String? createdBy;
+  final String? lastMessage;
+  final DateTime? lastMessageAt;
+  final String? lastMessageBy;
+  final int chatMessageCount;
 
   WorkOrder copyWith({
     String? id,
@@ -102,6 +110,10 @@ class WorkOrder {
     String? assignedTo,
     List<String>? assignedTechnicians,
     String? createdBy,
+    String? lastMessage,
+    DateTime? lastMessageAt,
+    String? lastMessageBy,
+    int? chatMessageCount,
   }) {
     return WorkOrder(
       id: id ?? this.id,
@@ -129,6 +141,10 @@ class WorkOrder {
       assignedTo: assignedTo ?? this.assignedTo,
       assignedTechnicians: assignedTechnicians ?? this.assignedTechnicians,
       createdBy: createdBy ?? this.createdBy,
+      lastMessage: lastMessage ?? this.lastMessage,
+      lastMessageAt: lastMessageAt ?? this.lastMessageAt,
+      lastMessageBy: lastMessageBy ?? this.lastMessageBy,
+      chatMessageCount: chatMessageCount ?? this.chatMessageCount,
     );
   }
 
@@ -177,6 +193,10 @@ class WorkOrder {
       'assignedTo': assignedTo,
       'assignedTechnicians': assignedTechnicians,
       'createdBy': createdBy,
+      'lastMessage': lastMessage,
+      'lastMessageAt': lastMessageAt?.toIso8601String(),
+      'lastMessageBy': lastMessageBy,
+      'chatMessageCount': chatMessageCount,
     };
   }
 
@@ -223,6 +243,53 @@ class WorkOrder {
               .toList() ??
           const [],
       createdBy: map['createdBy'] as String?,
+      lastMessage: map['lastMessage'] as String?,
+      lastMessageAt: _dateTimeFromMapValue(map['lastMessageAt']),
+      lastMessageBy: displayPersonName(map['lastMessageBy'] as String?),
+      chatMessageCount: (map['chatMessageCount'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+class JobChatMessage {
+  const JobChatMessage({
+    required this.id,
+    required this.workOrderId,
+    required this.senderId,
+    required this.senderName,
+    required this.senderRole,
+    required this.message,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String workOrderId;
+  final String senderId;
+  final String senderName;
+  final String senderRole;
+  final String message;
+  final DateTime createdAt;
+
+  Map<String, Object?> toMap() {
+    return {
+      'workOrderId': workOrderId,
+      'senderId': senderId,
+      'senderName': senderName,
+      'senderRole': senderRole,
+      'message': message,
+      'createdAt': createdAt.toIso8601String(),
+    };
+  }
+
+  factory JobChatMessage.fromMap(String id, Map<String, dynamic> map) {
+    return JobChatMessage(
+      id: id,
+      workOrderId: map['workOrderId'] as String? ?? '',
+      senderId: map['senderId'] as String? ?? '',
+      senderName: displayPersonName(map['senderName'] as String?),
+      senderRole: map['senderRole'] as String? ?? 'user',
+      message: map['message'] as String? ?? '',
+      createdAt: _dateTimeFromMapValue(map['createdAt']) ?? DateTime.now(),
     );
   }
 }

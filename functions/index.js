@@ -1,11 +1,18 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
-const { onDocumentWritten } = require("firebase-functions/v2/firestore");
+const { onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { initializeApp } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
 const { FieldValue, getFirestore } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
+const { defineSecret, defineString } = require("firebase-functions/params");
 
 initializeApp();
+
+const huaweiClientId = defineString("HUAWEI_CLIENT_ID");
+const huaweiProjectId = defineString("HUAWEI_PROJECT_ID");
+const huaweiAppId = defineString("HUAWEI_APP_ID");
+const huaweiClientSecret = defineSecret("HUAWEI_CLIENT_SECRET");
+const huaweiSecrets = [huaweiClientSecret];
 
 exports.createUser = onCall(async (request) => {
   if (!request.auth) {
@@ -68,7 +75,7 @@ exports.createUser = onCall(async (request) => {
   }
 });
 
-exports.sendTestNotification = onCall(async (request) => {
+exports.sendTestNotification = onCall({ secrets: huaweiSecrets }, async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Sign in before testing notifications.");
   }
@@ -81,9 +88,10 @@ exports.sendTestNotification = onCall(async (request) => {
   const tokens = tokensForUsers([user]);
   console.log("sendTestNotification", {
     uid: request.auth.uid,
-    tokens: tokens.length,
+    fcmTokens: tokens.fcm.length,
+    hmsTokens: tokens.hms.length,
   });
-  if (tokens.length === 0) {
+  if (tokens.fcm.length === 0 && tokens.hms.length === 0) {
     throw new HttpsError(
       "failed-precondition",
       "This phone is not registered for notifications yet.",
@@ -106,7 +114,10 @@ exports.sendTestNotification = onCall(async (request) => {
 });
 
 exports.notifyWorkOrderUpdate = onDocumentWritten(
-  "work_orders/{orderId}",
+  {
+    document: "work_orders/{orderId}",
+    secrets: huaweiSecrets,
+  },
   async (event) => {
     const before = event.data?.before.exists ? event.data.before.data() : null;
     const after = event.data?.after.exists ? event.data.after.data() : null;
@@ -125,9 +136,10 @@ exports.notifyWorkOrderUpdate = onDocumentWritten(
       type: notification.type,
       audience: notification.audience,
       recipients: recipients.length,
-      tokens: tokens.length,
+      fcmTokens: tokens.fcm.length,
+      hmsTokens: tokens.hms.length,
     });
-    if (tokens.length === 0) return;
+    if (tokens.fcm.length === 0 && tokens.hms.length === 0) return;
 
     const result = await sendToTokens(tokens, {
       notification: {
@@ -144,6 +156,61 @@ exports.notifyWorkOrderUpdate = onDocumentWritten(
       orderId: event.params.orderId,
       successCount: result.successCount,
       failureCount: result.failureCount,
+    });
+  },
+);
+
+exports.notifyJobChatMessage = onDocumentCreated(
+  {
+    document: "work_orders/{orderId}/messages/{messageId}",
+    secrets: huaweiSecrets,
+  },
+  async (event) => {
+    const message = event.data?.data();
+    if (!message) return;
+
+    const db = getFirestore();
+    const orderDoc = await db.collection("work_orders").doc(event.params.orderId).get();
+    if (!orderDoc.exists) return;
+
+    const order = orderDoc.data();
+    const senderId = cleanString(message.senderId);
+    const senderName = cleanString(message.senderName) || "ISDP User";
+    const site = cleanString(order.site) || "Job chat";
+    const text = cleanString(message.message);
+    if (!text) return;
+
+    await db.collection("work_orders").doc(event.params.orderId).update({
+      lastMessage: text,
+      lastMessageAt: FieldValue.serverTimestamp(),
+      lastMessageBy: senderName,
+      chatMessageCount: FieldValue.increment(1),
+    });
+
+    const users = await db.collection("users").get();
+    const recipients = users.docs.filter((doc) =>
+      doc.id !== senderId && shouldNotifyUser(doc.id, doc.data(), "field_team", order),
+    );
+    const tokens = tokensForUsers(recipients);
+    console.log("notifyJobChatMessage", {
+      orderId: event.params.orderId,
+      messageId: event.params.messageId,
+      recipients: recipients.length,
+      fcmTokens: tokens.fcm.length,
+      hmsTokens: tokens.hms.length,
+    });
+    if (tokens.fcm.length === 0 && tokens.hms.length === 0) return;
+
+    await sendToTokens(tokens, {
+      notification: {
+        title: `${site} chat`,
+        body: `${senderName}: ${text.slice(0, 120)}`,
+      },
+      data: {
+        workOrderId: event.params.orderId,
+        messageId: event.params.messageId,
+        type: "job_chat_message",
+      },
     });
   },
 );
@@ -267,24 +334,47 @@ function matchesPerson(uid, user, value) {
 }
 
 function tokensForUsers(users) {
-  const tokens = new Set();
+  const fcm = new Set();
+  const hms = new Set();
   for (const user of users) {
     const data = user.data();
     for (const token of Array.isArray(data.fcmTokens) ? data.fcmTokens : []) {
-      if (cleanString(token)) tokens.add(cleanString(token));
+      if (cleanString(token)) fcm.add(cleanString(token));
+    }
+    for (const token of Array.isArray(data.hmsTokens) ? data.hmsTokens : []) {
+      if (cleanString(token)) hms.add(cleanString(token));
     }
     const tokenMap = data.notificationTokens || {};
     for (const [token, enabled] of Object.entries(tokenMap)) {
-      if (enabled && token) tokens.add(token);
+      if (enabled && token) fcm.add(token);
     }
     if (cleanString(data.lastNotificationToken)) {
-      tokens.add(cleanString(data.lastNotificationToken));
+      fcm.add(cleanString(data.lastNotificationToken));
+    }
+    if (cleanString(data.lastHuaweiNotificationToken)) {
+      hms.add(cleanString(data.lastHuaweiNotificationToken));
     }
   }
-  return Array.from(tokens);
+  return {
+    fcm: Array.from(fcm),
+    hms: Array.from(hms),
+  };
 }
 
 async function sendToTokens(tokens, message) {
+  const [fcmResult, hmsResult] = await Promise.all([
+    sendToFirebaseTokens(tokens.fcm, message),
+    sendToHuaweiTokens(tokens.hms, message),
+  ]);
+  return {
+    successCount: fcmResult.successCount + hmsResult.successCount,
+    failureCount: fcmResult.failureCount + hmsResult.failureCount,
+    fcm: fcmResult,
+    hms: hmsResult,
+  };
+}
+
+async function sendToFirebaseTokens(tokens, message) {
   const messaging = getMessaging();
   let successCount = 0;
   let failureCount = 0;
@@ -300,6 +390,110 @@ async function sendToTokens(tokens, message) {
     }
   }
   return { successCount, failureCount };
+}
+
+let huaweiAccessToken = null;
+let huaweiAccessTokenExpiresAt = 0;
+
+async function sendToHuaweiTokens(tokens, message) {
+  if (tokens.length === 0) {
+    return { successCount: 0, failureCount: 0 };
+  }
+
+  const projectId = cleanString(huaweiProjectId.value());
+  const appId = cleanString(huaweiAppId.value());
+  if (!projectId && !appId) {
+    console.warn("HMS tokens found, but HUAWEI_PROJECT_ID or HUAWEI_APP_ID is not configured.");
+    return { successCount: 0, failureCount: tokens.length };
+  }
+
+  let accessToken;
+  try {
+    accessToken = await getHuaweiAccessToken();
+  } catch (error) {
+    console.warn("HMS access token failure", error.message);
+    return { successCount: 0, failureCount: tokens.length };
+  }
+  let successCount = 0;
+  let failureCount = 0;
+  for (let index = 0; index < tokens.length; index += 500) {
+    const batch = tokens.slice(index, index + 500);
+    const response = await fetch(
+      `https://push-api.cloud.huawei.com/v2/${projectId || appId}/messages:send`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          validate_only: false,
+          message: {
+            token: batch,
+            notification: message.notification,
+            data: JSON.stringify(stringValues(message.data || {})),
+            android: {
+              notification: {
+                click_action: { type: 3 },
+              },
+            },
+          },
+        }),
+      },
+    );
+    const payload = await response.json().catch(() => ({}));
+    if (response.ok && cleanString(payload.code) === "80000000") {
+      successCount += batch.length;
+    } else {
+      failureCount += batch.length;
+      console.warn("HMS send failure", {
+        status: response.status,
+        code: payload.code,
+        msg: payload.msg,
+        requestId: payload.requestId,
+      });
+    }
+  }
+  return { successCount, failureCount };
+}
+
+async function getHuaweiAccessToken() {
+  if (huaweiAccessToken && Date.now() < huaweiAccessTokenExpiresAt) {
+    return huaweiAccessToken;
+  }
+
+  const clientId = cleanString(huaweiClientId.value());
+  const clientSecret = cleanString(huaweiClientSecret.value());
+  if (!clientId || !clientSecret) {
+    throw new Error("Huawei Push Kit server credentials are not configured.");
+  }
+
+  const params = new URLSearchParams({
+    grant_type: "client_credentials",
+    client_id: clientId,
+    client_secret: clientSecret,
+  });
+  const response = await fetch("https://oauth-login.cloud.huawei.com/oauth2/v3/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.access_token) {
+    throw new Error(`Huawei access token request failed: ${response.status} ${payload.error || ""}`);
+  }
+
+  huaweiAccessToken = payload.access_token;
+  huaweiAccessTokenExpiresAt = Date.now() + (((payload.expires_in || 3600) - 60) * 1000);
+  return huaweiAccessToken;
+}
+
+function stringValues(data) {
+  return Object.fromEntries(
+    Object.entries(data)
+      .filter(([, value]) => value !== undefined && value !== null)
+      .map(([key, value]) => [key, String(value)]),
+  );
 }
 
 function assignedTechniciansChanged(before, after) {

@@ -27,8 +27,10 @@ service cloud.firestore {
             'mustChangePassword',
             'passwordChangedAt',
             'fcmTokens',
+            'hmsTokens',
             'notificationTokens',
             'lastNotificationToken',
+            'lastHuaweiNotificationToken',
             'notificationsUpdatedAt'
           ]) &&
         (
@@ -41,6 +43,21 @@ service cloud.firestore {
     match /work_orders/{orderId} {
       allow read, create, update: if signedIn();
       allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow read: if signedIn();
+        allow create: if signedIn() &&
+          request.resource.data.senderId == request.auth.uid &&
+          request.resource.data.message is string &&
+          request.resource.data.message.size() > 0 &&
+          request.resource.data.message.size() <= 2000;
+        allow update, delete: if false;
+      }
+
+      match /chat_reads/{userId} {
+        allow read, create, update: if signedIn() && request.auth.uid == userId;
+        allow delete: if false;
+      }
     }
   }
 }

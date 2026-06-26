@@ -273,6 +273,7 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
   String _search = '';
   String _status = 'All';
   WorkOrder? _selectedOrder;
+  WorkOrder? _selectedChatOrder;
   final List<_AdminNotification> _notifications = [];
   var _technicians = <AdminUserProfile>[];
   var _isFetching = false;
@@ -304,6 +305,7 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
             onSelected: (section) => setState(() {
               _section = section;
               if (section != AdminSection.workOrders) _selectedOrder = null;
+              if (section != AdminSection.jobChats) _selectedChatOrder = null;
             }),
             onSignOut: widget.onSignOut,
           ),
@@ -312,7 +314,9 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
               children: [
                 _TopBar(
                   title: _selectedOrder == null
-                      ? _section.label
+                      ? _selectedChatOrder == null
+                            ? _section.label
+                            : 'Job chat'
                       : 'Work order details',
                   isSyncing: _isSyncing,
                   onRefresh: _loadOrders,
@@ -322,7 +326,9 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
                       .length,
                   onNotifications: _showNotifications,
                   onBack: _selectedOrder == null
-                      ? null
+                      ? _selectedChatOrder == null
+                            ? null
+                            : () => setState(() => _selectedChatOrder = null)
                       : () => setState(() => _selectedOrder = null),
                 ),
                 Expanded(
@@ -369,6 +375,20 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
                 onShowQr: () => _showQrDialog(_selectedOrder!),
                 onDelete: () => _confirmDeleteOrder(_selectedOrder!),
               ),
+      AdminSection.jobChats =>
+        _selectedChatOrder == null
+            ? JobChatsView(
+                orders: _orders,
+                repository: widget.repository,
+                session: widget.session,
+                onOpen: _openJobChat,
+              )
+            : JobChatView(
+                order: _selectedChatOrder!,
+                repository: widget.repository,
+                session: widget.session,
+                onBack: () => setState(() => _selectedChatOrder = null),
+              ),
       AdminSection.teams => TeamsView(
         orders: _orders,
         onAssign: _openAssign,
@@ -411,6 +431,14 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
     setState(() {
       _section = AdminSection.workOrders;
       _selectedOrder = order;
+    });
+  }
+
+  void _openJobChat(WorkOrder order) {
+    setState(() {
+      _section = AdminSection.jobChats;
+      _selectedChatOrder = order;
+      _selectedOrder = null;
     });
   }
 
@@ -985,6 +1013,523 @@ class WorkOrdersView extends StatelessWidget {
         else
           ...orders.map((order) => _OrderCard(order: order, onOpen: onOpen)),
       ],
+    );
+  }
+}
+
+class JobChatsView extends StatelessWidget {
+  const JobChatsView({
+    super.key,
+    required this.orders,
+    required this.repository,
+    required this.session,
+    required this.onOpen,
+  });
+
+  final List<WorkOrder> orders;
+  final AdminRepository repository;
+  final AuthSession session;
+  final ValueChanged<WorkOrder> onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final activeOrders =
+        orders.where((order) => order.status != 'Approved').toList()
+          ..sort(_compareChatActivity);
+
+    return _Page(
+      children: [
+        _Panel(
+          title: 'Job Chats',
+          trailing: _DesktopUnreadTotalBadge(
+            repository: repository,
+            session: session,
+            orders: activeOrders,
+          ),
+          child: activeOrders.isEmpty
+              ? const _EmptyState(message: 'No active jobs available for chat.')
+              : Column(
+                  children: [
+                    for (final order in activeOrders)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _JobChatRow(
+                          order: order,
+                          repository: repository,
+                          session: session,
+                          onOpen: onOpen,
+                        ),
+                      ),
+                  ],
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+class _JobChatRow extends StatelessWidget {
+  const _JobChatRow({
+    required this.order,
+    required this.repository,
+    required this.session,
+    required this.onOpen,
+  });
+
+  final WorkOrder order;
+  final AdminRepository repository;
+  final AuthSession session;
+  final ValueChanged<WorkOrder> onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            _IconPill(
+              icon: Icons.forum_outlined,
+              color: _statusColor(order.status),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${order.id} - ${order.site}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    _chatDetail(order),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: AppColors.muted),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            _DesktopUnreadJobBadge(
+              repository: repository,
+              session: session,
+              order: order,
+            ),
+            const SizedBox(width: 12),
+            _StatusPill(label: order.status, color: _statusColor(order.status)),
+            const SizedBox(width: 12),
+            OutlinedButton.icon(
+              onPressed: () => onOpen(order),
+              icon: const Icon(Icons.chat_bubble_outline),
+              label: _DesktopUnreadOpenChatLabel(
+                repository: repository,
+                session: session,
+                order: order,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DesktopUnreadTotalBadge extends StatelessWidget {
+  const _DesktopUnreadTotalBadge({
+    required this.repository,
+    required this.session,
+    required this.orders,
+  });
+
+  final AdminRepository repository;
+  final AuthSession session;
+  final List<WorkOrder> orders;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<int>(
+      future: Future.wait(
+        orders.map(
+          (order) => repository.fetchUnreadJobMessageCount(session, order.id),
+        ),
+      ).then((counts) => counts.fold<int>(0, (total, value) => total + value)),
+      builder: (context, snapshot) {
+        final count = snapshot.data ?? 0;
+        if (count == 0) return const SizedBox.shrink();
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Unread',
+              style: TextStyle(
+                color: AppColors.muted,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(width: 8),
+            _DesktopUnreadCountBadge(count: count),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _DesktopUnreadJobBadge extends StatelessWidget {
+  const _DesktopUnreadJobBadge({
+    required this.repository,
+    required this.session,
+    required this.order,
+  });
+
+  final AdminRepository repository;
+  final AuthSession session;
+  final WorkOrder order;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<int>(
+      future: repository.fetchUnreadJobMessageCount(session, order.id),
+      builder: (context, snapshot) {
+        final count = snapshot.data ?? 0;
+        if (count == 0) return const SizedBox.shrink();
+        return _DesktopUnreadCountBadge(count: count);
+      },
+    );
+  }
+}
+
+class _DesktopUnreadOpenChatLabel extends StatelessWidget {
+  const _DesktopUnreadOpenChatLabel({
+    required this.repository,
+    required this.session,
+    required this.order,
+  });
+
+  final AdminRepository repository;
+  final AuthSession session;
+  final WorkOrder order;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<int>(
+      future: repository.fetchUnreadJobMessageCount(session, order.id),
+      builder: (context, snapshot) {
+        final count = snapshot.data ?? 0;
+        if (count == 0) return const Text('Open chat');
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Open chat'),
+            const SizedBox(width: 8),
+            _DesktopUnreadCountBadge(count: count),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _DesktopUnreadCountBadge extends StatelessWidget {
+  const _DesktopUnreadCountBadge({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppColors.danger,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        count > 99 ? '99+' : '$count',
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 11,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+    );
+  }
+}
+
+int _compareChatActivity(WorkOrder a, WorkOrder b) {
+  final aTime = a.lastMessageAt;
+  final bTime = b.lastMessageAt;
+  if (aTime != null && bTime != null) return bTime.compareTo(aTime);
+  if (aTime != null) return -1;
+  if (bTime != null) return 1;
+  return a.site.toLowerCase().compareTo(b.site.toLowerCase());
+}
+
+String _chatDetail(WorkOrder order) {
+  final message = order.lastMessage?.trim();
+  if (message?.isNotEmpty == true) {
+    final sender = order.lastMessageBy?.trim();
+    return sender?.isNotEmpty == true ? '$sender: $message' : message!;
+  }
+  return order.scope;
+}
+
+class JobChatView extends StatefulWidget {
+  const JobChatView({
+    super.key,
+    required this.order,
+    required this.repository,
+    required this.session,
+    required this.onBack,
+  });
+
+  final WorkOrder order;
+  final AdminRepository repository;
+  final AuthSession session;
+  final VoidCallback onBack;
+
+  @override
+  State<JobChatView> createState() => _JobChatViewState();
+}
+
+class _JobChatViewState extends State<JobChatView> {
+  final _messageController = TextEditingController();
+  late Future<List<JobChatMessage>> _messagesFuture;
+  bool _sending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(
+      widget.repository.markJobChatRead(widget.session, widget.order.id),
+    );
+    _messagesFuture = _loadMessages();
+  }
+
+  @override
+  void didUpdateWidget(covariant JobChatView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.order.id != widget.order.id) {
+      unawaited(
+        widget.repository.markJobChatRead(widget.session, widget.order.id),
+      );
+      _messagesFuture = _loadMessages();
+    }
+  }
+
+  @override
+  void dispose() {
+    _messageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _Page(
+      children: [
+        Row(
+          children: [
+            OutlinedButton.icon(
+              onPressed: widget.onBack,
+              icon: const Icon(Icons.arrow_back),
+              label: const Text('Back to chats'),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                '${widget.order.id} - ${widget.order.site}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+            _StatusPill(
+              label: widget.order.status,
+              color: _statusColor(widget.order.status),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _Panel(
+          title: 'Conversation',
+          trailing: IconButton(
+            tooltip: 'Refresh messages',
+            onPressed: _refreshMessages,
+            icon: const Icon(Icons.refresh),
+          ),
+          child: FutureBuilder<List<JobChatMessage>>(
+            future: _messagesFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Padding(
+                  padding: EdgeInsets.all(28),
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              if (snapshot.hasError) {
+                return const _EmptyState(
+                  message: 'Could not load messages. $_supportContactMessage',
+                );
+              }
+              final messages = snapshot.data ?? const [];
+              if (messages.isEmpty) {
+                return const _EmptyState(
+                  message: 'No messages yet. Start the job conversation.',
+                );
+              }
+              return Column(
+                children: [
+                  for (final message in messages)
+                    _DesktopMessageBubble(
+                      message: message,
+                      mine: message.senderId == widget.session.uid,
+                    ),
+                ],
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 12),
+        _Panel(
+          title: 'Send Message',
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _messageController,
+                  minLines: 1,
+                  maxLines: 4,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: const InputDecoration(
+                    labelText: 'Message this job',
+                    prefixIcon: Icon(Icons.chat_outlined),
+                  ),
+                  onSubmitted: (_) => _sendMessage(),
+                ),
+              ),
+              const SizedBox(width: 12),
+              FilledButton.icon(
+                onPressed: _sending ? null : _sendMessage,
+                icon: Icon(_sending ? Icons.hourglass_empty : Icons.send),
+                label: Text(_sending ? 'Sending' : 'Send'),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<List<JobChatMessage>> _loadMessages() {
+    return widget.repository.fetchJobMessages(widget.session, widget.order.id);
+  }
+
+  void _refreshMessages() {
+    setState(() => _messagesFuture = _loadMessages());
+  }
+
+  Future<void> _sendMessage() async {
+    final text = _messageController.text.trim();
+    if (text.isEmpty || _sending) return;
+    setState(() => _sending = true);
+    try {
+      await widget.repository.sendJobMessage(
+        widget.session,
+        workOrderId: widget.order.id,
+        message: text,
+      );
+      _messageController.clear();
+      _refreshMessages();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not send message. $_supportContactMessage'),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+}
+
+class _DesktopMessageBubble extends StatelessWidget {
+  const _DesktopMessageBubble({required this.message, required this.mine});
+
+  final JobChatMessage message;
+  final bool mine;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = mine ? AppColors.primary : const Color(0xFFF1F4F8);
+    final textColor = mine ? Colors.white : AppColors.ink;
+    return Align(
+      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 760),
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(8),
+          border: mine ? null : Border.all(color: AppColors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(
+                    message.senderName.isEmpty
+                        ? 'ISDP User'
+                        : message.senderName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: textColor,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  _dateTimeLabel(message.createdAt),
+                  style: TextStyle(
+                    color: textColor.withValues(alpha: 0.72),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            SelectableText(message.message, style: TextStyle(color: textColor)),
+            const SizedBox(height: 6),
+            Text(
+              message.senderRole,
+              style: TextStyle(
+                color: textColor.withValues(alpha: 0.72),
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -2766,6 +3311,20 @@ abstract class AdminRepository {
     required String action,
   });
   Future<void> deleteWorkOrder(AuthSession session, WorkOrder order);
+  Future<int> fetchUnreadJobMessageCount(
+    AuthSession session,
+    String workOrderId,
+  );
+  Future<void> markJobChatRead(AuthSession session, String workOrderId);
+  Future<List<JobChatMessage>> fetchJobMessages(
+    AuthSession session,
+    String workOrderId,
+  );
+  Future<void> sendJobMessage(
+    AuthSession session, {
+    required String workOrderId,
+    required String message,
+  });
 }
 
 class RestAdminRepository implements AdminRepository {
@@ -2910,6 +3469,134 @@ class RestAdminRepository implements AdminRepository {
     }
   }
 
+  @override
+  Future<int> fetchUnreadJobMessageCount(
+    AuthSession session,
+    String workOrderId,
+  ) async {
+    final readAt = await _fetchJobChatReadAt(session, workOrderId);
+    final messages = await fetchJobMessages(session, workOrderId);
+    return messages
+        .where(
+          (message) =>
+              message.senderId != session.uid &&
+              (readAt == null || message.createdAt.isAfter(readAt)),
+        )
+        .length;
+  }
+
+  @override
+  Future<void> markJobChatRead(AuthSession session, String workOrderId) async {
+    final uri = _documentsUri(
+      '/work_orders/$workOrderId/chat_reads/${session.uid}',
+    );
+    final response = await _client.patch(
+      uri,
+      headers: _headers(session),
+      body: jsonEncode({
+        'fields': {
+          'userId': _stringField(session.uid),
+          'readAt': _timestampField(DateTime.now()),
+        },
+      }),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException.fromBody(_decode(response));
+    }
+  }
+
+  Future<DateTime?> _fetchJobChatReadAt(
+    AuthSession session,
+    String workOrderId,
+  ) async {
+    final uri = _documentsUri(
+      '/work_orders/$workOrderId/chat_reads/${session.uid}',
+    );
+    final response = await _client.get(uri, headers: _headers(session));
+    if (response.statusCode == 404) return null;
+    final body = _decode(response);
+    if (response.statusCode >= 400) throw ApiException.fromBody(body);
+    final fields = body['fields'] as Map<String, dynamic>? ?? const {};
+    return _fieldDate(fields['readAt']);
+  }
+
+  @override
+  Future<List<JobChatMessage>> fetchJobMessages(
+    AuthSession session,
+    String workOrderId,
+  ) async {
+    final uri = _documentsUri(
+      '/work_orders/$workOrderId/messages',
+      query: const {'pageSize': '100'},
+    );
+    final response = await _client.get(uri, headers: _headers(session));
+    final body = _decode(response);
+    if (response.statusCode >= 400) throw ApiException.fromBody(body);
+
+    final documents = (body['documents'] as List<dynamic>? ?? const []);
+    final messages =
+        documents
+            .whereType<Map<String, dynamic>>()
+            .map(JobChatMessage.fromFirestoreDocument)
+            .toList()
+          ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return messages;
+  }
+
+  @override
+  Future<void> sendJobMessage(
+    AuthSession session, {
+    required String workOrderId,
+    required String message,
+  }) async {
+    final trimmed = message.trim();
+    if (trimmed.isEmpty) return;
+    final uri = _documentsUri('/work_orders/$workOrderId/messages');
+    final now = DateTime.now();
+    final response = await _client.post(
+      uri,
+      headers: _headers(session),
+      body: jsonEncode({
+        'fields': {
+          'workOrderId': _stringField(workOrderId),
+          'senderId': _stringField(session.uid),
+          'senderName': _stringField(displayPersonName(session.email)),
+          'senderRole': _stringField('Admin'),
+          'message': _stringField(trimmed),
+          'createdAt': _timestampField(now),
+        },
+      }),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException.fromBody(_decode(response));
+    }
+
+    final updateUri = _documentsUri(
+      '/work_orders/$workOrderId',
+      query: {
+        'updateMask.fieldPaths': [
+          'lastMessage',
+          'lastMessageAt',
+          'lastMessageBy',
+        ],
+      },
+    );
+    final updateResponse = await _client.patch(
+      updateUri,
+      headers: _headers(session),
+      body: jsonEncode({
+        'fields': {
+          'lastMessage': _stringField(trimmed),
+          'lastMessageAt': _timestampField(now),
+          'lastMessageBy': _stringField(displayPersonName(session.email)),
+        },
+      }),
+    );
+    if (updateResponse.statusCode >= 400) {
+      throw ApiException.fromBody(_decode(updateResponse));
+    }
+  }
+
   Uri _documentsUri(String path, {Map<String, dynamic>? query}) {
     return Uri.https(
       'firestore.googleapis.com',
@@ -3041,6 +3728,10 @@ class WorkOrder {
     this.assignedTo,
     this.assignedTechnicians = const [],
     this.createdBy,
+    this.lastMessage,
+    this.lastMessageAt,
+    this.lastMessageBy,
+    this.chatMessageCount = 0,
   });
 
   final String id;
@@ -3068,6 +3759,10 @@ class WorkOrder {
   final String? assignedTo;
   final List<String> assignedTechnicians;
   final String? createdBy;
+  final String? lastMessage;
+  final DateTime? lastMessageAt;
+  final String? lastMessageBy;
+  final int chatMessageCount;
 
   bool get isDueSoon {
     final due = dueAt;
@@ -3092,6 +3787,10 @@ class WorkOrder {
     String? assignedTo,
     List<String>? assignedTechnicians,
     String? createdBy,
+    String? lastMessage,
+    DateTime? lastMessageAt,
+    String? lastMessageBy,
+    int? chatMessageCount,
   }) {
     return WorkOrder(
       id: id,
@@ -3119,6 +3818,10 @@ class WorkOrder {
       assignedTo: assignedTo ?? this.assignedTo,
       assignedTechnicians: assignedTechnicians ?? this.assignedTechnicians,
       createdBy: createdBy ?? this.createdBy,
+      lastMessage: lastMessage ?? this.lastMessage,
+      lastMessageAt: lastMessageAt ?? this.lastMessageAt,
+      lastMessageBy: lastMessageBy ?? this.lastMessageBy,
+      chatMessageCount: chatMessageCount ?? this.chatMessageCount,
     );
   }
 
@@ -3173,6 +3876,10 @@ class WorkOrder {
         fields['assignedTechnicians'],
       ).map(displayPersonName).where((name) => name.isNotEmpty).toList(),
       createdBy: _fieldString(fields['createdBy']),
+      lastMessage: _fieldString(fields['lastMessage']),
+      lastMessageAt: _fieldDate(fields['lastMessageAt']),
+      lastMessageBy: displayPersonName(_fieldString(fields['lastMessageBy'])),
+      chatMessageCount: _fieldInt(fields['chatMessageCount']) ?? 0,
     );
   }
 
@@ -3231,6 +3938,41 @@ class WorkOrder {
   }
 }
 
+class JobChatMessage {
+  const JobChatMessage({
+    required this.id,
+    required this.workOrderId,
+    required this.senderId,
+    required this.senderName,
+    required this.senderRole,
+    required this.message,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String workOrderId;
+  final String senderId;
+  final String senderName;
+  final String senderRole;
+  final String message;
+  final DateTime createdAt;
+
+  factory JobChatMessage.fromFirestoreDocument(Map<String, dynamic> document) {
+    final name = document['name'] as String? ?? '';
+    final id = name.split('/').last;
+    final fields = document['fields'] as Map<String, dynamic>? ?? const {};
+    return JobChatMessage(
+      id: id,
+      workOrderId: _fieldString(fields['workOrderId']) ?? '',
+      senderId: _fieldString(fields['senderId']) ?? '',
+      senderName: displayPersonName(_fieldString(fields['senderName'])),
+      senderRole: _fieldString(fields['senderRole']) ?? 'User',
+      message: _fieldString(fields['message']) ?? '',
+      createdAt: _fieldDate(fields['createdAt']) ?? DateTime.now(),
+    );
+  }
+}
+
 enum Priority {
   critical('Critical'),
   high('High'),
@@ -3251,6 +3993,7 @@ enum Priority {
 enum AdminSection {
   dashboard('Dashboard', Icons.dashboard_outlined),
   workOrders('Work orders', Icons.assignment_outlined),
+  jobChats('Job chats', Icons.forum_outlined),
   teams('Field teams', Icons.people_alt_outlined),
   acceptance('Acceptance', Icons.fact_check_outlined),
   analytics('Analytics', Icons.query_stats_outlined);
@@ -4494,6 +5237,16 @@ String? _fieldString(Object? field) {
 bool? _fieldBool(Object? field) {
   if (field is! Map<String, dynamic>) return null;
   return field['booleanValue'] as bool?;
+}
+
+int? _fieldInt(Object? field) {
+  if (field is! Map<String, dynamic>) return null;
+  final integerValue = field['integerValue'];
+  if (integerValue is int) return integerValue;
+  if (integerValue is String) return int.tryParse(integerValue);
+  final doubleValue = field['doubleValue'];
+  if (doubleValue is num) return doubleValue.toInt();
+  return null;
 }
 
 DateTime? _fieldDate(Object? field) {

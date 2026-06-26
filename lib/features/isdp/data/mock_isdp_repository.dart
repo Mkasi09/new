@@ -56,4 +56,26 @@ class MockIsdpRepository implements IsdpRepository {
 
   @override
   Future<void> deleteWorkOrder(WorkOrder order) async {}
+
+  @override
+  Stream<List<JobChatMessage>> watchJobMessages(String workOrderId) =>
+      Stream.value(const []);
+
+  @override
+  Future<void> sendJobMessage({
+    required String workOrderId,
+    required String message,
+    required String senderName,
+    required String senderRole,
+  }) async {}
+
+  @override
+  Stream<int> watchUnreadJobMessageCount(String workOrderId) => Stream.value(0);
+
+  @override
+  Stream<int> watchUnreadJobMessageTotal(List<String> workOrderIds) =>
+      Stream.value(0);
+
+  @override
+  Future<void> markJobChatRead(String workOrderId) async {}
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../../../core/domain/app_role.dart';
@@ -419,6 +420,8 @@ class _NotificationSettingsScreen extends StatefulWidget {
 class _NotificationSettingsScreenState
     extends State<_NotificationSettingsScreen> {
   NotificationRegistrationStatus? _status;
+  TestNotificationResult? _testResult;
+  String? _lastError;
   bool _checking = false;
   bool _sendingTest = false;
 
@@ -433,6 +436,7 @@ class _NotificationSettingsScreenState
     final tokenText = status?.token == null
         ? null
         : 'Token saved: ${status!.token!.substring(0, 12)}...';
+    final testResult = _testResult;
 
     return _SettingsScaffold(
       title: 'Notifications',
@@ -450,6 +454,21 @@ class _NotificationSettingsScreenState
                   ? statusText
                   : '$statusText\n$tokenText',
             ),
+            if (testResult != null)
+              _InfoRow(
+                icon: testResult.sent
+                    ? Icons.outgoing_mail
+                    : Icons.warning_amber_outlined,
+                title: 'Last Test',
+                subtitle:
+                    'Sent: ${testResult.successCount}, Failed: ${testResult.failureCount}',
+              ),
+            if (_lastError != null)
+              _InfoRow(
+                icon: Icons.error_outline,
+                title: 'Last Error',
+                subtitle: _lastError!,
+              ),
             _NavRow(
               icon: Icons.refresh,
               title: _checking ? 'Checking...' : 'Check Notifications',
@@ -511,6 +530,7 @@ class _NotificationSettingsScreenState
     if (!mounted) return;
     setState(() {
       _status = status;
+      _lastError = status.error?.toString();
       _checking = false;
     });
     ScaffoldMessenger.of(context).showSnackBar(
@@ -525,7 +545,10 @@ class _NotificationSettingsScreenState
   }
 
   Future<void> _sendTestNotification() async {
-    setState(() => _sendingTest = true);
+    setState(() {
+      _sendingTest = true;
+      _lastError = null;
+    });
     try {
       if (widget.userId != null) {
         final status = await NotificationService.registerCurrentDevice(
@@ -534,15 +557,31 @@ class _NotificationSettingsScreenState
         );
         if (mounted) setState(() => _status = status);
       }
-      await NotificationService.sendTestNotification();
+      final result = await NotificationService.sendTestNotification();
       if (!mounted) return;
+      setState(() => _testResult = result);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Test notification sent. Check this phone.'),
+        SnackBar(
+          content: Text(
+            result.sent
+                ? 'Test notification sent. Check this phone.'
+                : 'Firebase found no successful sends. $supportContactMessage',
+          ),
         ),
       );
-    } catch (_) {
+    } on FirebaseFunctionsException catch (error) {
       if (!mounted) return;
+      setState(() => _lastError = '${error.code}: ${error.message}');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not send test notification: ${error.code}. $supportContactMessage',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _lastError = error.toString());
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(

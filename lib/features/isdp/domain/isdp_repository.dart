@@ -38,4 +38,19 @@ abstract class IsdpRepository {
   Future<void> approveWorkOrder(WorkOrder order);
 
   Future<void> deleteWorkOrder(WorkOrder order);
+
+  Stream<List<JobChatMessage>> watchJobMessages(String workOrderId);
+
+  Future<void> sendJobMessage({
+    required String workOrderId,
+    required String message,
+    required String senderName,
+    required String senderRole,
+  });
+
+  Stream<int> watchUnreadJobMessageCount(String workOrderId);
+
+  Stream<int> watchUnreadJobMessageTotal(List<String> workOrderIds);
+
+  Future<void> markJobChatRead(String workOrderId);
 }

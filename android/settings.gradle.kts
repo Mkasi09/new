@@ -13,8 +13,10 @@ pluginManagement {
     repositories {
         google()
         mavenCentral()
+        maven { url = uri("https://developer.huawei.com/repo/") }
         gradlePluginPortal()
     }
+
 }
 
 plugins {

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../core/domain/app_role.dart';
 import '../domain/entities.dart';
+import '../domain/isdp_repository.dart';
 import 'widgets/common.dart';
 
 class DashboardView extends StatefulWidget {
@@ -11,6 +12,7 @@ class DashboardView extends StatefulWidget {
     required this.role,
     required this.selectedOrder,
     required this.workOrders,
+    required this.repository,
     required this.jobSteps,
     required this.materials,
     required this.onOpenOrder,
@@ -27,11 +29,14 @@ class DashboardView extends StatefulWidget {
     required this.onUploadEvidence,
     required this.onOpenCompletionDetails,
     required this.onSubmitCompletion,
+    required this.onOpenJobChat,
+    required this.onOpenJobChats,
   });
 
   final AppRole role;
   final WorkOrder selectedOrder;
   final List<WorkOrder> workOrders;
+  final IsdpRepository repository;
   final List<JobStep> jobSteps;
   final List<MaterialLine> materials;
   final ValueChanged<WorkOrder> onOpenOrder;
@@ -48,6 +53,8 @@ class DashboardView extends StatefulWidget {
   final Future<List<String>?> Function(WorkOrder, String?) onUploadEvidence;
   final ValueChanged<WorkOrder> onOpenCompletionDetails;
   final Future<void> Function(WorkOrder) onSubmitCompletion;
+  final ValueChanged<WorkOrder> onOpenJobChat;
+  final VoidCallback onOpenJobChats;
 
   @override
   State<DashboardView> createState() => _DashboardViewState();
@@ -96,6 +103,9 @@ class _DashboardViewState extends State<DashboardView> {
         onOpenReviewQueue: widget.onOpenReviewQueue,
         onAddUser: widget.onAddUser,
         onOpenReviewOrder: widget.onOpenReviewOrder,
+        onOpenJobChat: widget.onOpenJobChat,
+        onOpenJobChats: widget.onOpenJobChats,
+        repository: widget.repository,
       ),
       AppRole.supervisor => _SupervisorHome(
         workOrders: widget.workOrders,
@@ -104,6 +114,8 @@ class _DashboardViewState extends State<DashboardView> {
         onOpenSupervisorJob: widget.onOpenSupervisorJob,
         onAcceptOrder: widget.onAcceptOrder,
         onAssignOrder: widget.onAssignOrder,
+        onOpenJobChat: widget.onOpenJobChat,
+        repository: widget.repository,
       ),
       AppRole.technician => _TechnicianHome(
         order: widget.selectedOrder,
@@ -118,6 +130,8 @@ class _DashboardViewState extends State<DashboardView> {
         onOpenOrder: widget.onOpenOrder,
         onOpenCompletionDetails: widget.onOpenCompletionDetails,
         onSubmitCompletion: widget.onSubmitCompletion,
+        onOpenJobChat: widget.onOpenJobChat,
+        repository: widget.repository,
       ),
     };
   }
@@ -190,6 +204,9 @@ class _AdminHome extends StatelessWidget {
     required this.onOpenReviewQueue,
     this.onAddUser,
     required this.onOpenReviewOrder,
+    required this.onOpenJobChat,
+    required this.onOpenJobChats,
+    required this.repository,
   });
 
   final List<WorkOrder> workOrders;
@@ -199,6 +216,9 @@ class _AdminHome extends StatelessWidget {
   final VoidCallback onOpenReviewQueue;
   final VoidCallback? onAddUser;
   final ValueChanged<WorkOrder> onOpenReviewOrder;
+  final ValueChanged<WorkOrder> onOpenJobChat;
+  final VoidCallback onOpenJobChats;
+  final IsdpRepository repository;
 
   @override
   Widget build(BuildContext context) {
@@ -250,6 +270,14 @@ class _AdminHome extends StatelessWidget {
               badgeCount: unreviewed,
             ),
             _RoleAction(Icons.analytics_outlined, 'Analytics', onOpenAnalytics),
+            _RoleAction(
+              Icons.forum_outlined,
+              'Job Chats',
+              onOpenJobChats,
+              badgeStream: repository.watchUnreadJobMessageTotal(
+                workOrders.map((order) => order.id).toList(),
+              ),
+            ),
             if (onAddUser != null)
               _RoleAction(
                 Icons.person_add_alt_1_outlined,
@@ -289,6 +317,8 @@ class _SupervisorHome extends StatelessWidget {
     required this.onOpenSupervisorJob,
     required this.onAcceptOrder,
     required this.onAssignOrder,
+    required this.onOpenJobChat,
+    required this.repository,
   });
 
   final List<WorkOrder> workOrders;
@@ -297,6 +327,8 @@ class _SupervisorHome extends StatelessWidget {
   final ValueChanged<WorkOrder> onOpenSupervisorJob;
   final Future<void> Function(WorkOrder) onAcceptOrder;
   final Future<void> Function(WorkOrder) onAssignOrder;
+  final ValueChanged<WorkOrder> onOpenJobChat;
+  final IsdpRepository repository;
 
   @override
   Widget build(BuildContext context) {
@@ -406,6 +438,20 @@ class _SupervisorHome extends StatelessWidget {
                     ),
                   ],
                 ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () => onOpenJobChat(selectedOrder),
+                    icon: const Icon(Icons.forum_outlined),
+                    label: _ChatButtonLabel(
+                      text: 'Job Chat',
+                      stream: repository.watchUnreadJobMessageCount(
+                        selectedOrder.id,
+                      ),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -429,6 +475,8 @@ class _TechnicianHome extends StatelessWidget {
     required this.onOpenOrder,
     required this.onOpenCompletionDetails,
     required this.onSubmitCompletion,
+    required this.onOpenJobChat,
+    required this.repository,
   });
 
   final WorkOrder order;
@@ -443,6 +491,8 @@ class _TechnicianHome extends StatelessWidget {
   final ValueChanged<WorkOrder> onOpenOrder;
   final ValueChanged<WorkOrder> onOpenCompletionDetails;
   final Future<void> Function(WorkOrder) onSubmitCompletion;
+  final ValueChanged<WorkOrder> onOpenJobChat;
+  final IsdpRepository repository;
 
   @override
   Widget build(BuildContext context) {
@@ -492,6 +542,8 @@ class _TechnicianHome extends StatelessWidget {
               : !completionReady
               ? null
               : () => onSubmitCompletion(order),
+          onOpenJobChat: () => onOpenJobChat(order),
+          unreadJobChatStream: repository.watchUnreadJobMessageCount(order.id),
         ),
         const SizedBox(height: 12),
         _TechnicianJobDetails(order: order, onTap: () => onOpenOrder(order)),
@@ -767,6 +819,8 @@ class _TodayActionPanel extends StatelessWidget {
     required this.onUploadAfter,
     required this.onCompletionDetails,
     required this.onSubmitCompletion,
+    required this.onOpenJobChat,
+    required this.unreadJobChatStream,
   });
 
   final double progress;
@@ -780,6 +834,8 @@ class _TodayActionPanel extends StatelessWidget {
   final VoidCallback? onUploadAfter;
   final VoidCallback? onCompletionDetails;
   final VoidCallback? onSubmitCompletion;
+  final VoidCallback onOpenJobChat;
+  final Stream<int> unreadJobChatStream;
 
   @override
   Widget build(BuildContext context) {
@@ -842,6 +898,16 @@ class _TodayActionPanel extends StatelessWidget {
               buttonLabel: 'Submit',
               onTap: onSubmitCompletion,
             ),
+            const Divider(height: 18),
+            _CompactWorkActionRow(
+              icon: Icons.forum_outlined,
+              title: 'Job communication',
+              complete: false,
+              enabled: true,
+              buttonLabel: 'Open Chat',
+              onTap: onOpenJobChat,
+              badgeStream: unreadJobChatStream,
+            ),
           ],
         ),
       ),
@@ -857,6 +923,7 @@ class _CompactWorkActionRow extends StatelessWidget {
     required this.enabled,
     required this.buttonLabel,
     required this.onTap,
+    this.badgeStream,
   });
 
   final IconData icon;
@@ -865,6 +932,7 @@ class _CompactWorkActionRow extends StatelessWidget {
   final bool enabled;
   final String buttonLabel;
   final VoidCallback? onTap;
+  final Stream<int>? badgeStream;
 
   @override
   Widget build(BuildContext context) {
@@ -895,7 +963,9 @@ class _CompactWorkActionRow extends StatelessWidget {
         else
           FilledButton(
             onPressed: enabled ? onTap : null,
-            child: Text(buttonLabel),
+            child: badgeStream == null
+                ? Text(buttonLabel)
+                : _ChatButtonLabel(text: buttonLabel, stream: badgeStream!),
           ),
       ],
     );
@@ -1088,7 +1158,23 @@ class _ActionGrid extends StatelessWidget {
                               textAlign: TextAlign.center,
                               style: const TextStyle(fontSize: 12),
                             ),
-                            if (action.badgeCount > 0)
+                            if (action.badgeStream != null)
+                              StreamBuilder<int>(
+                                stream: action.badgeStream,
+                                initialData: action.badgeCount,
+                                builder: (context, snapshot) {
+                                  final count = snapshot.data ?? 0;
+                                  if (count == 0) {
+                                    return const SizedBox.shrink();
+                                  }
+                                  return Positioned(
+                                    right: -18,
+                                    top: -12,
+                                    child: _CountBadge(count: count),
+                                  );
+                                },
+                              )
+                            else if (action.badgeCount > 0)
                               Positioned(
                                 right: -18,
                                 top: -12,
@@ -1109,12 +1195,46 @@ class _ActionGrid extends StatelessWidget {
 }
 
 class _RoleAction {
-  const _RoleAction(this.icon, this.label, this.onTap, {this.badgeCount = 0});
+  const _RoleAction(
+    this.icon,
+    this.label,
+    this.onTap, {
+    this.badgeCount = 0,
+    this.badgeStream,
+  });
 
   final IconData icon;
   final String label;
   final VoidCallback onTap;
   final int badgeCount;
+  final Stream<int>? badgeStream;
+}
+
+class _ChatButtonLabel extends StatelessWidget {
+  const _ChatButtonLabel({required this.text, required this.stream});
+
+  final String text;
+  final Stream<int> stream;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<int>(
+      stream: stream,
+      initialData: 0,
+      builder: (context, snapshot) {
+        final count = snapshot.data ?? 0;
+        if (count == 0) return Text(text);
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(text),
+            const SizedBox(width: 8),
+            UnreadCountBadge(count: count),
+          ],
+        );
+      },
+    );
+  }
 }
 
 class _CountBadge extends StatelessWidget {
@@ -1124,23 +1244,7 @@ class _CountBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: AppTheme.danger,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Text(
-        '$count',
-        textAlign: TextAlign.center,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 11,
-          fontWeight: FontWeight.w900,
-        ),
-      ),
-    );
+    return UnreadCountBadge(count: count);
   }
 }
 

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/domain/app_role.dart';
 import '../../../core/support/support_contact.dart';
@@ -20,6 +21,8 @@ import 'create_job_screen.dart';
 import 'completion_details_screen.dart';
 import 'dashboard_view.dart';
 import 'empty_jobs_view.dart';
+import 'job_chat_screen.dart';
+import 'job_chats_screen.dart';
 import 'qr_arrival_scan_screen.dart';
 import 'review_job_screen.dart';
 import 'review_queue_screen.dart';
@@ -37,6 +40,7 @@ enum _WorkflowView {
   analytics,
   reviewQueue,
   reviewJob,
+  jobChats,
   supervisorQueue,
   supervisorJob,
   addUser,
@@ -82,6 +86,7 @@ class _IsdpShellState extends State<IsdpShell> {
   final List<_AppNotification> _notifications = [];
   final Map<String, WorkOrder> _knownOrders = {};
   final Set<String> _notificationKeys = {};
+  final Set<String> _readNotificationKeys = {};
   final Set<String> _pendingCreateIds = {};
   List<AppUserProfile> _technicians = const [];
   bool _notificationsInitialized = false;
@@ -90,6 +95,7 @@ class _IsdpShellState extends State<IsdpShell> {
   void initState() {
     super.initState();
     unawaited(_loadTechnicians());
+    unawaited(_loadReadNotifications());
   }
 
   @override
@@ -154,6 +160,7 @@ class _IsdpShellState extends State<IsdpShell> {
                   role: _role,
                   selectedOrder: selectedOrder,
                   workOrders: visibleOrders,
+                  repository: _repository,
                   jobSteps: _repository.getJobSteps(),
                   materials: _repository.getMaterials(),
                   onOpenOrder: _openOrder,
@@ -172,6 +179,8 @@ class _IsdpShellState extends State<IsdpShell> {
                   onUploadEvidence: _uploadEvidence,
                   onOpenCompletionDetails: _openCompletionDetails,
                   onSubmitCompletion: _submitCompletion,
+                  onOpenJobChat: _openJobChat,
+                  onOpenJobChats: _openJobChatsScreen,
                 ),
               if (_role == AppRole.admin && _adminOrder != null)
                 _buildAdminJobPage(visibleOrders)
@@ -450,6 +459,12 @@ class _IsdpShellState extends State<IsdpShell> {
         onOpenReview: _openReviewScreenFromQueue,
         onClose: _closeWorkflow,
       ),
+      _WorkflowView.jobChats => JobChatsScreen(
+        orders: visibleOrders,
+        repository: _repository,
+        onOpenChat: _openJobChat,
+        onClose: _closeWorkflow,
+      ),
       _WorkflowView.supervisorQueue => SupervisorQueueScreen(
         orders: visibleOrders,
         onOpenJob: _openSupervisorJobScreen,
@@ -506,6 +521,8 @@ class _IsdpShellState extends State<IsdpShell> {
       order: order,
       onAccept: () => _acceptOrder(order),
       onAssign: () => _assignOrder(order),
+      onOpenChat: () => _openJobChat(order),
+      unreadChatStream: _repository.watchUnreadJobMessageCount(order.id),
       onClose: _openSupervisorQueueScreen,
     );
   }
@@ -520,6 +537,8 @@ class _IsdpShellState extends State<IsdpShell> {
     return AdminJobScreen(
       order: order,
       onSendQr: () => _sendQr(order),
+      onOpenChat: () => _openJobChat(order),
+      unreadChatStream: _repository.watchUnreadJobMessageCount(order.id),
       onDelete: () => _confirmDeleteOrder(order),
       onClose: _closeAdminJob,
     );
@@ -583,6 +602,19 @@ class _IsdpShellState extends State<IsdpShell> {
     });
   }
 
+  void _openJobChat(WorkOrder order) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => JobChatScreen(
+          order: order,
+          repository: _repository,
+          userProfile: widget.userProfile,
+          onClose: () => Navigator.of(context).pop(),
+        ),
+      ),
+    );
+  }
+
   void _closeAdminJob() {
     setState(() => _adminOrder = null);
   }
@@ -618,6 +650,10 @@ class _IsdpShellState extends State<IsdpShell> {
       if (!mounted) return;
       _knownOrders.remove(order.id);
       _notificationKeys.removeWhere((key) => key.startsWith('${order.id}:'));
+      _readNotificationKeys.removeWhere(
+        (key) => key.startsWith('${order.id}:'),
+      );
+      unawaited(_saveReadNotifications());
       setState(() {
         _workOrders = _workOrders
             .where((candidate) => candidate.id != order.id)
@@ -727,6 +763,19 @@ class _IsdpShellState extends State<IsdpShell> {
   void _openReviewQueueScreen() {
     setState(() {
       _workflowView = _WorkflowView.reviewQueue;
+      _assigningOrder = null;
+      _scanningOrder = null;
+      _uploadingOrder = null;
+      _reviewingOrder = null;
+      _supervisorOrder = null;
+      _returnToReviewQueue = false;
+      _tab = 0;
+    });
+  }
+
+  void _openJobChatsScreen() {
+    setState(() {
+      _workflowView = _WorkflowView.jobChats;
       _assigningOrder = null;
       _scanningOrder = null;
       _uploadingOrder = null;
@@ -1070,12 +1119,13 @@ class _IsdpShellState extends State<IsdpShell> {
       if (previous == null) {
         updates.add(
           _AppNotification(
-            key: '${order.id}:new',
+            key: _newNotificationKey(order),
             orderId: order.id,
             title: 'New work order',
             message: '${order.site} has been added to your queue.',
             createdAt: DateTime.now(),
             type: _NotificationType.assignment,
+            read: _isNotificationRead(_newNotificationKey(order)),
           ),
         );
         continue;
@@ -1083,14 +1133,16 @@ class _IsdpShellState extends State<IsdpShell> {
 
       if (previous.issueReport != order.issueReport &&
           order.issueReport?.trim().isNotEmpty == true) {
+        final key = _issueNotificationKey(order);
         updates.add(
           _AppNotification(
-            key: '${order.id}:issue:${order.issueReport!.trim()}',
+            key: key,
             orderId: order.id,
             title: 'Issue reported',
             message: '${order.site}: ${order.issueReport!.trim()}',
             createdAt: DateTime.now(),
             type: _NotificationType.issue,
+            read: _isNotificationRead(key),
           ),
         );
       }
@@ -1101,14 +1153,16 @@ class _IsdpShellState extends State<IsdpShell> {
 
       if (previous.technicianLabel != order.technicianLabel &&
           order.technicianLabel != null) {
+        final key = _assignedNotificationKey(order);
         updates.add(
           _AppNotification(
-            key: '${order.id}:assigned:${order.technicianLabel}',
+            key: key,
             orderId: order.id,
             title: 'Technician assigned',
             message: '${order.site} assigned to ${order.technicianLabel}.',
             createdAt: DateTime.now(),
             type: _NotificationType.assignment,
+            read: _isNotificationRead(key),
           ),
         );
       }
@@ -1117,12 +1171,13 @@ class _IsdpShellState extends State<IsdpShell> {
           order.customerSignature?.isNotEmpty == true) {
         updates.add(
           _AppNotification(
-            key: '${order.id}:signoff',
+            key: _signoffNotificationKey(order),
             orderId: order.id,
             title: 'Customer sign-off captured',
             message: '${order.site} completion details are ready.',
             createdAt: DateTime.now(),
             type: _NotificationType.success,
+            read: _isNotificationRead(_signoffNotificationKey(order)),
           ),
         );
       }
@@ -1189,11 +1244,7 @@ class _IsdpShellState extends State<IsdpShell> {
                         if (hasUnread)
                           TextButton(
                             onPressed: () {
-                              setState(() {
-                                for (final item in _notifications) {
-                                  item.read = true;
-                                }
-                              });
+                              setState(_markAllNotificationsRead);
                               setSheetState(() {});
                             },
                             child: const Text('Mark all read'),
@@ -1213,7 +1264,7 @@ class _IsdpShellState extends State<IsdpShell> {
                               return _NotificationCard(
                                 notification: item,
                                 onTap: () {
-                                  setState(() => item.read = true);
+                                  setState(() => _markNotificationRead(item));
                                   Navigator.pop(context);
                                   _openNotificationTarget(item);
                                 },
@@ -1277,14 +1328,74 @@ class _IsdpShellState extends State<IsdpShell> {
       _ => 'Job status updated',
     };
     return _AppNotification(
-      key: '${order.id}:status:${order.status}',
+      key: _statusNotificationKey(order),
       orderId: order.id,
       title: title,
       message: '${order.site} is now ${order.status.toLowerCase()}.',
       createdAt: DateTime.now(),
       type: type,
+      read: _isNotificationRead(_statusNotificationKey(order)),
     );
   }
+
+  Future<void> _loadReadNotifications() async {
+    final preferences = await SharedPreferences.getInstance();
+    final saved = preferences.getStringList(_readNotificationsStorageKey);
+    if (saved == null || !mounted) return;
+    setState(() {
+      _readNotificationKeys
+        ..clear()
+        ..addAll(saved);
+      for (final item in _notifications) {
+        item.read = _isNotificationRead(item.key);
+      }
+    });
+  }
+
+  Future<void> _saveReadNotifications() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setStringList(
+      _readNotificationsStorageKey,
+      _readNotificationKeys.take(300).toList(growable: false),
+    );
+  }
+
+  String get _readNotificationsStorageKey {
+    final userKey =
+        widget.userProfile?.uid ?? widget.userProfile?.email ?? 'local';
+    return 'isdp_read_notifications_$userKey';
+  }
+
+  bool _isNotificationRead(String key) => _readNotificationKeys.contains(key);
+
+  void _markNotificationRead(_AppNotification item) {
+    _readNotificationKeys.add(item.key);
+    _notifications.removeWhere((notification) => notification.key == item.key);
+    _notificationKeys.remove(item.key);
+    unawaited(_saveReadNotifications());
+  }
+
+  void _markAllNotificationsRead() {
+    for (final item in _notifications) {
+      _readNotificationKeys.add(item.key);
+    }
+    _notificationKeys.removeAll(_notifications.map((item) => item.key));
+    _notifications.clear();
+    unawaited(_saveReadNotifications());
+  }
+
+  String _newNotificationKey(WorkOrder order) => '${order.id}:new';
+
+  String _issueNotificationKey(WorkOrder order) =>
+      '${order.id}:issue:${order.issueReport!.trim()}';
+
+  String _assignedNotificationKey(WorkOrder order) =>
+      '${order.id}:assigned:${order.technicianLabel}';
+
+  String _signoffNotificationKey(WorkOrder order) => '${order.id}:signoff';
+
+  String _statusNotificationKey(WorkOrder order) =>
+      '${order.id}:status:${order.status}';
 
   void _openCompletionDetails(WorkOrder order) {
     setState(() {
@@ -1408,6 +1519,7 @@ class _AppNotification {
     required this.message,
     required this.createdAt,
     required this.type,
+    this.read = false,
   });
 
   final String key;
@@ -1416,7 +1528,7 @@ class _AppNotification {
   final String message;
   final DateTime createdAt;
   final _NotificationType type;
-  bool read = false;
+  bool read;
 }
 
 String _notificationTime(DateTime value) {

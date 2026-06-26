@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -177,6 +179,130 @@ class FirebaseIsdpRepository implements IsdpRepository {
     return _workOrders.doc(order.id).delete();
   }
 
+  @override
+  Stream<List<JobChatMessage>> watchJobMessages(String workOrderId) {
+    return _workOrders
+        .doc(workOrderId)
+        .collection('messages')
+        .orderBy('createdAt', descending: false)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => JobChatMessage.fromMap(doc.id, doc.data()))
+              .toList(),
+        );
+  }
+
+  @override
+  Future<void> sendJobMessage({
+    required String workOrderId,
+    required String message,
+    required String senderName,
+    required String senderRole,
+  }) async {
+    final trimmed = message.trim();
+    if (trimmed.isEmpty) return;
+    final doc = _workOrders.doc(workOrderId).collection('messages').doc();
+    final now = FieldValue.serverTimestamp();
+    await doc.set({
+      'workOrderId': workOrderId,
+      'senderId': _uid,
+      'senderName': senderName.trim().isEmpty ? 'ISDP User' : senderName.trim(),
+      'senderRole': senderRole,
+      'message': trimmed,
+      'createdAt': now,
+    });
+    await _workOrders.doc(workOrderId).update({
+      'lastMessage': trimmed,
+      'lastMessageAt': now,
+      'lastMessageBy': senderName.trim().isEmpty
+          ? 'ISDP User'
+          : senderName.trim(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  @override
+  Stream<int> watchUnreadJobMessageCount(String workOrderId) {
+    final uid = _uid;
+    final controller = StreamController<int>();
+    List<JobChatMessage> messages = const [];
+    DateTime? readAt;
+
+    void emit() {
+      if (controller.isClosed) return;
+      controller.add(
+        messages
+            .where(
+              (message) =>
+                  message.senderId != uid &&
+                  (readAt == null || message.createdAt.isAfter(readAt!)),
+            )
+            .length,
+      );
+    }
+
+    final messageSub = watchJobMessages(workOrderId).listen((value) {
+      messages = value;
+      emit();
+    }, onError: controller.addError);
+    final readSub = _workOrders
+        .doc(workOrderId)
+        .collection('chat_reads')
+        .doc(uid)
+        .snapshots()
+        .listen((snapshot) {
+          readAt = _dateTimeFromValue(snapshot.data()?['readAt']);
+          emit();
+        }, onError: controller.addError);
+
+    controller.onCancel = () async {
+      await messageSub.cancel();
+      await readSub.cancel();
+    };
+    return controller.stream;
+  }
+
+  @override
+  Stream<int> watchUnreadJobMessageTotal(List<String> workOrderIds) {
+    final ids = workOrderIds.toSet().toList();
+    if (ids.isEmpty) return Stream.value(0);
+    final controller = StreamController<int>();
+    final counts = <String, int>{for (final id in ids) id: 0};
+    final subscriptions = <StreamSubscription<int>>[];
+
+    void emit() {
+      if (!controller.isClosed) {
+        controller.add(
+          counts.values.fold<int>(0, (total, value) => total + value),
+        );
+      }
+    }
+
+    for (final id in ids) {
+      subscriptions.add(
+        watchUnreadJobMessageCount(id).listen((value) {
+          counts[id] = value;
+          emit();
+        }, onError: controller.addError),
+      );
+    }
+    controller.onCancel = () async {
+      for (final subscription in subscriptions) {
+        await subscription.cancel();
+      }
+    };
+    return controller.stream;
+  }
+
+  @override
+  Future<void> markJobChatRead(String workOrderId) {
+    return _workOrders.doc(workOrderId).collection('chat_reads').doc(_uid).set({
+      'userId': _uid,
+      'readAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
   Future<void> _updateStatus(WorkOrder order, String status, {String? sla}) {
     final update = <String, Object?>{
       'status': status,
@@ -190,4 +316,12 @@ class FirebaseIsdpRepository implements IsdpRepository {
   Map<String, Object?> _historyEntry(String action) {
     return {'action': action, 'userId': _uid, 'at': Timestamp.now()};
   }
+}
+
+DateTime? _dateTimeFromValue(Object? value) {
+  if (value == null) return null;
+  if (value is DateTime) return value;
+  if (value is Timestamp) return value.toDate();
+  if (value is String) return DateTime.tryParse(value);
+  return null;
 }

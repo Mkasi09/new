@@ -121,6 +121,32 @@ class FakeAdminRepository implements AdminRepository {
   Future<void> deleteWorkOrder(AuthSession session, WorkOrder order) async {
     deletedIds.add(order.id);
   }
+
+  @override
+  Future<int> fetchUnreadJobMessageCount(
+    AuthSession session,
+    String workOrderId,
+  ) async {
+    return 0;
+  }
+
+  @override
+  Future<void> markJobChatRead(AuthSession session, String workOrderId) async {}
+
+  @override
+  Future<List<JobChatMessage>> fetchJobMessages(
+    AuthSession session,
+    String workOrderId,
+  ) async {
+    return const [];
+  }
+
+  @override
+  Future<void> sendJobMessage(
+    AuthSession session, {
+    required String workOrderId,
+    required String message,
+  }) async {}
 }
 
 void main() {
