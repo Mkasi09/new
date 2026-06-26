@@ -29,59 +29,87 @@ class SupervisorJobScreen extends StatelessWidget {
 
     return AppScrollView(
       children: [
-        Row(
-          children: [
-            IconButton(
-              tooltip: 'Back',
-              onPressed: onClose,
-              icon: const Icon(Icons.arrow_back),
-            ),
-            const SizedBox(width: 4),
-            const Expanded(child: SectionTitle('Job Progress')),
-            StatusChip(
-              label: order.status,
-              color: workOrderStatusColor(order.status),
-            ),
-          ],
-        ),
+        JobDetailHeader(title: 'Job Progress', order: order, onBack: onClose),
         const SizedBox(height: 12),
         JobOverviewPanel(order: order),
         const SizedBox(height: 14),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: onOpenChat,
-            icon: const Icon(Icons.forum_outlined),
-            label: _UnreadChatLabel(stream: unreadChatStream),
-          ),
+        _SupervisorActionPanel(
+          awaitingAcceptance: awaitingAcceptance,
+          onAccept: onAccept,
+          onAssign: onAssign,
+          onOpenChat: onOpenChat,
+          unreadChatStream: unreadChatStream,
         ),
         const SizedBox(height: 14),
         _SupervisorProgress(order: order),
         const SizedBox(height: 14),
         _SupervisorEvidence(order: order),
-        const SizedBox(height: 14),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                FilledButton.icon(
-                  onPressed: awaitingAcceptance ? onAccept : onAssign,
-                  icon: Icon(
-                    awaitingAcceptance
-                        ? Icons.assignment_turned_in_outlined
-                        : Icons.person_add_alt,
-                  ),
-                  label: Text(
-                    awaitingAcceptance ? 'Accept Job' : 'Assign Technician',
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
       ],
+    );
+  }
+}
+
+class _SupervisorActionPanel extends StatelessWidget {
+  const _SupervisorActionPanel({
+    required this.awaitingAcceptance,
+    required this.onAccept,
+    required this.onAssign,
+    required this.onOpenChat,
+    required this.unreadChatStream,
+  });
+
+  final bool awaitingAcceptance;
+  final VoidCallback onAccept;
+  final VoidCallback onAssign;
+  final VoidCallback onOpenChat;
+  final Stream<int> unreadChatStream;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 560;
+            final primaryButton = FilledButton.icon(
+              onPressed: awaitingAcceptance ? onAccept : onAssign,
+              icon: Icon(
+                awaitingAcceptance
+                    ? Icons.assignment_turned_in_outlined
+                    : Icons.person_add_alt,
+              ),
+              label: Text(
+                awaitingAcceptance ? 'Accept Job' : 'Assign Technician',
+              ),
+            );
+            final chatButton = OutlinedButton.icon(
+              onPressed: onOpenChat,
+              icon: const Icon(Icons.forum_outlined),
+              label: _UnreadChatLabel(stream: unreadChatStream),
+            );
+
+            if (compact) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  primaryButton,
+                  const SizedBox(height: 10),
+                  chatButton,
+                ],
+              );
+            }
+
+            return Row(
+              children: [
+                Expanded(child: primaryButton),
+                const SizedBox(width: 10),
+                Expanded(child: chatButton),
+              ],
+            );
+          },
+        ),
+      ),
     );
   }
 }
@@ -95,7 +123,6 @@ class _UnreadChatLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     return StreamBuilder<int>(
       stream: stream,
-      initialData: 0,
       builder: (context, snapshot) {
         final count = snapshot.data ?? 0;
         if (count == 0) return const Text('Job Chat');
@@ -104,7 +131,14 @@ class _UnreadChatLabel extends StatelessWidget {
           children: [
             const Text('Job Chat'),
             const SizedBox(width: 8),
-            UnreadCountBadge(count: count),
+            Text(
+              count > 99 ? '99+ unread' : '$count unread',
+              style: const TextStyle(
+                color: AppTheme.danger,
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
           ],
         );
       },

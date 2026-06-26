@@ -38,6 +38,81 @@ class SectionTitle extends StatelessWidget {
   }
 }
 
+class JobDetailHeader extends StatelessWidget {
+  const JobDetailHeader({
+    super.key,
+    required this.title,
+    required this.order,
+    required this.onBack,
+    this.trailing,
+  });
+
+  final String title;
+  final WorkOrder order;
+  final VoidCallback onBack;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            IconButton.filledTonal(
+              tooltip: 'Back',
+              onPressed: onBack,
+              icon: const Icon(Icons.arrow_back),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${order.id} - ${order.siteCode}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppTheme.muted,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      StatusChip(
+                        label: order.status,
+                        color: workOrderStatusColor(order.status),
+                      ),
+                      StatusChip(
+                        label: order.priority.label,
+                        color: priorityColor(order.priority),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            if (trailing != null) ...[const SizedBox(width: 8), trailing!],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class IconPill extends StatelessWidget {
   const IconPill({super.key, required this.icon, required this.color});
 
@@ -157,6 +232,7 @@ class JobOverviewPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final progress = workOrderProgress(order);
     final content = Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -203,6 +279,25 @@ class JobOverviewPanel extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              minHeight: 8,
+              value: progress,
+              backgroundColor: const Color(0xFFE9EEF5),
+              color: workOrderStatusColor(order.status),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${workOrderStageLabel(order)} - ${(progress * 100).round()}%',
+            style: const TextStyle(
+              color: AppTheme.muted,
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 14),
           Text(
             order.scope,
             style: const TextStyle(fontWeight: FontWeight.w800),
@@ -227,6 +322,7 @@ class JobOverviewPanel extends StatelessWidget {
             runSpacing: 8,
             children: [
               InfoChip(icon: Icons.schedule_outlined, label: order.sla),
+              InfoChip(icon: Icons.badge_outlined, label: order.siteCode),
               InfoChip(icon: Icons.priority_high, label: order.priority.label),
               if (order.supervisor != null)
                 InfoChip(
@@ -359,59 +455,146 @@ class WorkOrderCard extends StatelessWidget {
   }
 
   Widget _content() {
+    final statusColor = workOrderStatusColor(order.status);
+
     return Padding(
-      padding: const EdgeInsets.all(14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  order.site,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w900,
-                    fontSize: 16,
-                  ),
+      padding: const EdgeInsets.all(0),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              width: 5,
+              decoration: BoxDecoration(
+                color: statusColor,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(8),
+                  bottomLeft: Radius.circular(8),
                 ),
               ),
-              StatusChip(
-                label: order.status,
-                color: workOrderStatusColor(order.status),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                order.site,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 16,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                '${order.id} - ${order.siteCode}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: AppTheme.muted,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        StatusChip(label: order.status, color: statusColor),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      order.scope,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        InfoChip(
+                          icon: Icons.flag_outlined,
+                          label: workOrderStageLabel(order),
+                        ),
+                        InfoChip(icon: Icons.schedule, label: order.sla),
+                        InfoChip(
+                          icon: Icons.priority_high,
+                          label: order.priority.label,
+                        ),
+                        if (order.supervisor != null)
+                          InfoChip(
+                            icon: Icons.supervisor_account_outlined,
+                            label: order.supervisor!,
+                          ),
+                        if (order.technicianLabel != null)
+                          InfoChip(
+                            icon: Icons.person_outline,
+                            label: order.technicianLabel!,
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            order.scope,
-            style: const TextStyle(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 6),
-          Text(order.id, style: const TextStyle(color: AppTheme.muted)),
-          const SizedBox(height: 4),
-          Text(order.address, style: const TextStyle(color: AppTheme.muted)),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              InfoChip(icon: Icons.schedule, label: order.sla),
-              if (order.supervisor != null)
-                InfoChip(
-                  icon: Icons.supervisor_account_outlined,
-                  label: order.supervisor!,
-                ),
-              if (order.technicianLabel != null)
-                InfoChip(
-                  icon: Icons.person_outline,
-                  label: order.technicianLabel!,
-                ),
-            ],
-          ),
-        ],
+            ),
+          ],
+        ),
       ),
     );
   }
+}
+
+Color priorityColor(Priority priority) {
+  switch (priority) {
+    case Priority.critical:
+      return AppTheme.danger;
+    case Priority.high:
+      return AppTheme.warning;
+    case Priority.low:
+      return AppTheme.secondary;
+  }
+}
+
+double workOrderProgress(WorkOrder order) {
+  if (order.status == 'Approved') return 1;
+  if (order.status == 'Submitted') return 0.88;
+  if (order.evidenceSlots.contains('after')) return 0.76;
+  if (order.evidenceSlots.contains('before')) return 0.62;
+  if (order.arrivalVerified || order.status == 'On Site') return 0.5;
+  if (order.status == 'Dispatched') return 0.38;
+  if (order.technicianLabel != null) return 0.28;
+  if (order.status == 'Accepted by Supervisor' || order.status == 'Accepted') {
+    return 0.2;
+  }
+  return 0.1;
+}
+
+String workOrderStageLabel(WorkOrder order) {
+  if (order.status == 'Approved') return 'Approved';
+  if (order.status == 'Submitted') return 'Awaiting review';
+  if (order.evidenceSlots.contains('after')) return 'Ready to submit';
+  if (order.evidenceSlots.contains('before')) return 'Work in progress';
+  if (order.arrivalVerified || order.status == 'On Site') return 'On site';
+  if (order.status == 'Dispatched') return 'Dispatched';
+  if (order.technicianLabel != null) return 'Technician assigned';
+  if (order.status == 'Accepted by Supervisor' || order.status == 'Accepted') {
+    return 'Accepted';
+  }
+  if (order.status == 'Assigned to Supervisor') return 'Supervisor review';
+  return 'New job';
 }
 
 Color workOrderStatusColor(String status) {

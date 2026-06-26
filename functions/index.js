@@ -75,44 +75,6 @@ exports.createUser = onCall(async (request) => {
   }
 });
 
-exports.sendTestNotification = onCall({ secrets: huaweiSecrets }, async (request) => {
-  if (!request.auth) {
-    throw new HttpsError("unauthenticated", "Sign in before testing notifications.");
-  }
-
-  const user = await getFirestore().collection("users").doc(request.auth.uid).get();
-  if (!user.exists) {
-    throw new HttpsError("not-found", "Your user profile was not found.");
-  }
-
-  const tokens = tokensForUsers([user]);
-  console.log("sendTestNotification", {
-    uid: request.auth.uid,
-    fcmTokens: tokens.fcm.length,
-    hmsTokens: tokens.hms.length,
-  });
-  if (tokens.fcm.length === 0 && tokens.hms.length === 0) {
-    throw new HttpsError(
-      "failed-precondition",
-      "This phone is not registered for notifications yet.",
-    );
-  }
-
-  const result = await sendToTokens(tokens, {
-    notification: {
-      title: "PHEPHA MV ISDP",
-      body: "Test notification received. Phone alerts are working.",
-    },
-    data: {
-      type: "notification_test",
-      title: "PHEPHA MV ISDP",
-      body: "Test notification received. Phone alerts are working.",
-    },
-  });
-
-  return result;
-});
-
 exports.notifyWorkOrderUpdate = onDocumentWritten(
   {
     document: "work_orders/{orderId}",
@@ -380,7 +342,19 @@ async function sendToFirebaseTokens(tokens, message) {
   let failureCount = 0;
   for (let index = 0; index < tokens.length; index += 500) {
     const batch = tokens.slice(index, index + 500);
-    const response = await messaging.sendEachForMulticast({ tokens: batch, ...message });
+    const response = await messaging.sendEachForMulticast({
+      tokens: batch,
+      ...message,
+      android: {
+        priority: "high",
+        notification: {
+          channelId: "isdp_work_updates",
+          priority: "high",
+          defaultSound: true,
+          defaultVibrateTimings: true,
+        },
+      },
+    });
     successCount += response.successCount;
     failureCount += response.failureCount;
     if (response.failureCount > 0) {
@@ -434,6 +408,11 @@ async function sendToHuaweiTokens(tokens, message) {
             data: JSON.stringify(stringValues(message.data || {})),
             android: {
               notification: {
+                channel_id: "isdp_work_updates",
+                importance: "HIGH",
+                use_default_vibrate: true,
+                use_default_light: true,
+                foreground_show: true,
                 click_action: { type: 3 },
               },
             },

@@ -228,22 +228,28 @@ class FirebaseIsdpRepository implements IsdpRepository {
     final controller = StreamController<int>();
     List<JobChatMessage> messages = const [];
     DateTime? readAt;
+    var hasMessages = false;
+    var hasReadState = false;
+    int? lastCount;
 
     void emit() {
       if (controller.isClosed) return;
-      controller.add(
-        messages
-            .where(
-              (message) =>
-                  message.senderId != uid &&
-                  (readAt == null || message.createdAt.isAfter(readAt!)),
-            )
-            .length,
-      );
+      if (!hasMessages || !hasReadState) return;
+      final count = messages
+          .where(
+            (message) =>
+                message.senderId != uid &&
+                (readAt == null || message.createdAt.isAfter(readAt!)),
+          )
+          .length;
+      if (count == lastCount) return;
+      lastCount = count;
+      controller.add(count);
     }
 
     final messageSub = watchJobMessages(workOrderId).listen((value) {
       messages = value;
+      hasMessages = true;
       emit();
     }, onError: controller.addError);
     final readSub = _workOrders
@@ -253,6 +259,7 @@ class FirebaseIsdpRepository implements IsdpRepository {
         .snapshots()
         .listen((snapshot) {
           readAt = _dateTimeFromValue(snapshot.data()?['readAt']);
+          hasReadState = true;
           emit();
         }, onError: controller.addError);
 
@@ -269,20 +276,26 @@ class FirebaseIsdpRepository implements IsdpRepository {
     if (ids.isEmpty) return Stream.value(0);
     final controller = StreamController<int>();
     final counts = <String, int>{for (final id in ids) id: 0};
+    final readyIds = <String>{};
     final subscriptions = <StreamSubscription<int>>[];
+    int? lastTotal;
 
     void emit() {
-      if (!controller.isClosed) {
-        controller.add(
-          counts.values.fold<int>(0, (total, value) => total + value),
-        );
-      }
+      if (controller.isClosed || readyIds.length != ids.length) return;
+      final total = counts.values.fold<int>(
+        0,
+        (currentTotal, value) => currentTotal + value,
+      );
+      if (total == lastTotal) return;
+      lastTotal = total;
+      controller.add(total);
     }
 
     for (final id in ids) {
       subscriptions.add(
         watchUnreadJobMessageCount(id).listen((value) {
           counts[id] = value;
+          readyIds.add(id);
           emit();
         }, onError: controller.addError),
       );

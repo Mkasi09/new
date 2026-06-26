@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -12,12 +11,14 @@ class NotificationRegistrationStatus {
   const NotificationRegistrationStatus({
     required this.permission,
     required this.tokenSaved,
+    this.provider,
     this.token,
     this.error,
   });
 
   final NotificationSettings permission;
   final bool tokenSaved;
+  final String? provider;
   final String? token;
   final Object? error;
 
@@ -25,18 +26,6 @@ class NotificationRegistrationStatus {
       tokenSaved &&
       (permission.authorizationStatus == AuthorizationStatus.authorized ||
           permission.authorizationStatus == AuthorizationStatus.provisional);
-}
-
-class TestNotificationResult {
-  const TestNotificationResult({
-    required this.successCount,
-    required this.failureCount,
-  });
-
-  final int successCount;
-  final int failureCount;
-
-  bool get sent => successCount > 0;
 }
 
 class NotificationService {
@@ -47,7 +36,6 @@ class NotificationService {
   );
   static final FirebaseMessaging _messaging = FirebaseMessaging.instance;
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  static final FirebaseFunctions _functions = FirebaseFunctions.instance;
   static final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
   static final Set<String> _registeredUsers = {};
@@ -63,6 +51,8 @@ class NotificationService {
         'ISDP Work Updates',
         description: 'Job assignments, submissions, approvals, and issues.',
         importance: Importance.high,
+        enableVibration: true,
+        playSound: true,
       );
 
   static Future<NotificationRegistrationStatus> registerCurrentDevice(
@@ -92,6 +82,7 @@ class NotificationService {
       return NotificationRegistrationStatus(
         permission: permission,
         tokenSaved: true,
+        provider: 'fcm',
       );
     }
     _registeredUsers.add(registrationKey);
@@ -114,6 +105,7 @@ class NotificationService {
       return NotificationRegistrationStatus(
         permission: permission,
         tokenSaved: true,
+        provider: 'fcm',
         token: token,
       );
     } catch (error) {
@@ -136,6 +128,7 @@ class NotificationService {
       return const NotificationRegistrationStatus(
         permission: _huaweiNotificationSettings,
         tokenSaved: true,
+        provider: 'hms',
       );
     }
     _registeredUsers.add(registrationKey);
@@ -148,6 +141,7 @@ class NotificationService {
       return NotificationRegistrationStatus(
         permission: _huaweiNotificationSettings,
         tokenSaved: true,
+        provider: 'hms',
         token: token,
       );
     } catch (error) {
@@ -174,20 +168,6 @@ class NotificationService {
       'lastHuaweiNotificationToken': token,
       'notificationsUpdatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
-  }
-
-  static Future<TestNotificationResult> sendTestNotification() async {
-    final response = await _functions
-        .httpsCallable('sendTestNotification')
-        .call();
-    final data = response.data;
-    if (data is Map) {
-      return TestNotificationResult(
-        successCount: (data['successCount'] as num?)?.toInt() ?? 0,
-        failureCount: (data['failureCount'] as num?)?.toInt() ?? 0,
-      );
-    }
-    return const TestNotificationResult(successCount: 0, failureCount: 0);
   }
 
   static Future<void> _initializeLocalNotifications() async {
