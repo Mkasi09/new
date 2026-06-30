@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:qr_flutter/qr_flutter.dart';
 
@@ -268,6 +269,7 @@ class AdminDesktopShell extends StatefulWidget {
 class _AdminDesktopShellState extends State<AdminDesktopShell> {
   var _section = AdminSection.dashboard;
   var _orders = <WorkOrder>[];
+  var _invoices = <Invoice>[];
   var _isLoading = true;
   var _isSyncing = false;
   String _search = '';
@@ -277,6 +279,7 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
   final List<_AdminNotification> _notifications = [];
   var _technicians = <AdminUserProfile>[];
   var _isFetching = false;
+  var _isFetchingInvoices = false;
   var _refreshQueued = false;
   Timer? _poller;
 
@@ -284,8 +287,12 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
   void initState() {
     super.initState();
     _loadOrders();
+    _loadInvoices();
     _loadTechnicians();
-    _poller = Timer.periodic(const Duration(seconds: 5), (_) => _loadOrders());
+    _poller = Timer.periodic(const Duration(seconds: 5), (_) {
+      _loadOrders();
+      _loadInvoices();
+    });
   }
 
   @override
@@ -319,7 +326,7 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
                             : 'Job chat'
                       : 'Work order details',
                   isSyncing: _isSyncing,
-                  onRefresh: _loadOrders,
+                  onRefresh: _refreshAll,
                   onCreate: _showCreateJobDialog,
                   notificationCount: _notifications
                       .where((item) => !item.read)
@@ -330,6 +337,11 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
                             ? null
                             : () => setState(() => _selectedChatOrder = null)
                       : () => setState(() => _selectedOrder = null),
+                  backLabel: _selectedOrder == null
+                      ? _selectedChatOrder == null
+                            ? null
+                            : 'Back to Job chats'
+                      : 'Back to Work orders',
                 ),
                 Expanded(
                   child: _isLoading
@@ -369,7 +381,6 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
               )
             : OrderDetailView(
                 order: _selectedOrder!,
-                onBack: () => setState(() => _selectedOrder = null),
                 onAction: _performAction,
                 onAssign: () => _openAssign(_selectedOrder!),
                 onShowQr: () => _showQrDialog(_selectedOrder!),
@@ -387,16 +398,25 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
                 order: _selectedChatOrder!,
                 repository: widget.repository,
                 session: widget.session,
-                onBack: () => setState(() => _selectedChatOrder = null),
               ),
       AdminSection.teams => TeamsView(
         orders: _orders,
+        technicians: _technicians,
         onAssign: _openAssign,
         onOpen: _openOrder,
+        onViewProfile: _showTechnicianProfile,
+        onChangeTeam: _changeTechnicianTeam,
       ),
       AdminSection.acceptance => AcceptanceView(
         orders: _orders,
         onApprove: (order) => _performAction(order, OrderAction.approve),
+        onOpen: _openOrder,
+      ),
+      AdminSection.billing => BillingView(
+        orders: _orders,
+        invoices: _invoices,
+        session: widget.session,
+        onSave: _saveInvoice,
         onOpen: _openOrder,
       ),
       AdminSection.analytics => AnalyticsView(orders: _orders),
@@ -490,6 +510,37 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
         unawaited(_loadOrders());
       }
     }
+  }
+
+  void _refreshAll() {
+    unawaited(_loadOrders());
+    unawaited(_loadInvoices());
+  }
+
+  Future<void> _loadInvoices() async {
+    if (_isFetchingInvoices) return;
+    _isFetchingInvoices = true;
+    try {
+      final invoices = await widget.repository.fetchInvoices(widget.session);
+      if (mounted) setState(() => _invoices = invoices);
+    } catch (_) {
+      // Keep the last successful billing view visible during refresh failures.
+    } finally {
+      _isFetchingInvoices = false;
+    }
+  }
+
+  Future<void> _saveInvoice(Invoice invoice) async {
+    await widget.repository.saveInvoice(widget.session, invoice);
+    if (!mounted) return;
+    setState(() {
+      final index = _invoices.indexWhere((item) => item.id == invoice.id);
+      if (index == -1) {
+        _invoices = [invoice, ..._invoices];
+      } else {
+        _invoices = [..._invoices]..[index] = invoice;
+      }
+    });
   }
 
   Future<void> _loadTechnicians() async {
@@ -717,6 +768,60 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
     );
   }
 
+  Future<void> _showTechnicianProfile(AdminUserProfile technician) {
+    return showDialog<void>(
+      context: context,
+      builder: (context) => TechnicianProfileDialog(technician: technician),
+    );
+  }
+
+  Future<void> _changeTechnicianTeam(AdminUserProfile technician) async {
+    final teams =
+        _technicians
+            .map((person) => person.team?.trim() ?? '')
+            .where((team) => team.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    final team = await showDialog<String>(
+      context: context,
+      builder: (context) =>
+          TechnicianTeamDialog(technician: technician, teams: teams),
+    );
+    if (team == null) return;
+
+    setState(() => _isSyncing = true);
+    try {
+      await widget.repository.updateTechnicianTeam(
+        widget.session,
+        technician,
+        team: team,
+      );
+      if (!mounted) return;
+      setState(() {
+        _technicians = _technicians
+            .map(
+              (person) => person.uid == technician.uid
+                  ? person.copyWith(team: team)
+                  : person,
+            )
+            .toList();
+      });
+      await _loadTechnicians();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${technician.name} assigned to $team.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_friendlyError(error))));
+    } finally {
+      if (mounted) setState(() => _isSyncing = false);
+    }
+  }
+
   Future<void> _performAction(WorkOrder order, OrderAction action) async {
     switch (action) {
       case OrderAction.accept:
@@ -896,7 +1001,7 @@ class DashboardView extends StatelessWidget {
             ],
           ),
           child: orders.isEmpty
-              ? const _EmptyState(message: 'No jobs found in Firestore yet.')
+              ? const _EmptyState(message: 'No jobs found yet.')
               : Column(
                   children: orders
                       .take(8)
@@ -1289,13 +1394,11 @@ class JobChatView extends StatefulWidget {
     required this.order,
     required this.repository,
     required this.session,
-    required this.onBack,
   });
 
   final WorkOrder order;
   final AdminRepository repository;
   final AuthSession session;
-  final VoidCallback onBack;
 
   @override
   State<JobChatView> createState() => _JobChatViewState();
@@ -1304,6 +1407,8 @@ class JobChatView extends StatefulWidget {
 class _JobChatViewState extends State<JobChatView> {
   final _messageController = TextEditingController();
   late Future<List<JobChatMessage>> _messagesFuture;
+  Timer? _messagePoller;
+  bool _refreshInProgress = false;
   bool _sending = false;
 
   @override
@@ -1313,6 +1418,10 @@ class _JobChatViewState extends State<JobChatView> {
       widget.repository.markJobChatRead(widget.session, widget.order.id),
     );
     _messagesFuture = _loadMessages();
+    _messagePoller = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) => unawaited(_refreshMessages()),
+    );
   }
 
   @override
@@ -1328,6 +1437,7 @@ class _JobChatViewState extends State<JobChatView> {
 
   @override
   void dispose() {
+    _messagePoller?.cancel();
     _messageController.dispose();
     super.dispose();
   }
@@ -1338,12 +1448,6 @@ class _JobChatViewState extends State<JobChatView> {
       children: [
         Row(
           children: [
-            OutlinedButton.icon(
-              onPressed: widget.onBack,
-              icon: const Icon(Icons.arrow_back),
-              label: const Text('Back to chats'),
-            ),
-            const SizedBox(width: 12),
             Expanded(
               child: Text(
                 '${widget.order.id} - ${widget.order.site}',
@@ -1372,7 +1476,8 @@ class _JobChatViewState extends State<JobChatView> {
           child: FutureBuilder<List<JobChatMessage>>(
             future: _messagesFuture,
             builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
+              if (snapshot.connectionState == ConnectionState.waiting &&
+                  !snapshot.hasData) {
                 return const Padding(
                   padding: EdgeInsets.all(28),
                   child: Center(child: CircularProgressIndicator()),
@@ -1437,8 +1542,23 @@ class _JobChatViewState extends State<JobChatView> {
     return widget.repository.fetchJobMessages(widget.session, widget.order.id);
   }
 
-  void _refreshMessages() {
-    setState(() => _messagesFuture = _loadMessages());
+  Future<void> _refreshMessages() async {
+    if (!mounted || _refreshInProgress) return;
+    _refreshInProgress = true;
+    final nextMessages = _loadMessages();
+    setState(() => _messagesFuture = nextMessages);
+    try {
+      await nextMessages;
+      if (mounted) {
+        unawaited(
+          widget.repository.markJobChatRead(widget.session, widget.order.id),
+        );
+      }
+    } catch (_) {
+      // The FutureBuilder keeps the error state visible until the next poll.
+    } finally {
+      _refreshInProgress = false;
+    }
   }
 
   Future<void> _sendMessage() async {
@@ -1452,7 +1572,7 @@ class _JobChatViewState extends State<JobChatView> {
         message: text,
       );
       _messageController.clear();
-      _refreshMessages();
+      await _refreshMessages();
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1604,7 +1724,6 @@ class OrderDetailView extends StatelessWidget {
   const OrderDetailView({
     super.key,
     required this.order,
-    required this.onBack,
     required this.onAction,
     required this.onAssign,
     required this.onShowQr,
@@ -1612,7 +1731,6 @@ class OrderDetailView extends StatelessWidget {
   });
 
   final WorkOrder order;
-  final VoidCallback onBack;
   final void Function(WorkOrder order, OrderAction action) onAction;
   final VoidCallback onAssign;
   final VoidCallback onShowQr;
@@ -1624,12 +1742,6 @@ class OrderDetailView extends StatelessWidget {
       children: [
         Row(
           children: [
-            OutlinedButton.icon(
-              onPressed: onBack,
-              icon: const Icon(Icons.arrow_back),
-              label: const Text('Back to jobs'),
-            ),
-            const SizedBox(width: 8),
             Expanded(
               child: Text(
                 order.id,
@@ -2695,13 +2807,19 @@ class TeamsView extends StatelessWidget {
   const TeamsView({
     super.key,
     required this.orders,
+    required this.technicians,
     required this.onAssign,
     required this.onOpen,
+    required this.onViewProfile,
+    required this.onChangeTeam,
   });
 
   final List<WorkOrder> orders;
+  final List<AdminUserProfile> technicians;
   final ValueChanged<WorkOrder> onAssign;
   final ValueChanged<WorkOrder> onOpen;
+  final ValueChanged<AdminUserProfile> onViewProfile;
+  final ValueChanged<AdminUserProfile> onChangeTeam;
 
   @override
   Widget build(BuildContext context) {
@@ -2735,21 +2853,226 @@ class TeamsView extends StatelessWidget {
         const SizedBox(height: 18),
         _Panel(
           title: 'Available Technicians',
-          child: Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: demoTechnicians
-                .map(
-                  (person) => _PersonCard(
-                    name: person.name,
-                    email: person.email,
-                    team: person.team,
-                  ),
+          child: technicians.isEmpty
+              ? const _EmptyState(
+                  message:
+                      'No technicians are available. Add technician users first.',
                 )
-                .toList(),
-          ),
+              : Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: technicians
+                      .map(
+                        (person) => _PersonCard(
+                          person: person,
+                          onViewProfile: () => onViewProfile(person),
+                          onChangeTeam: () => onChangeTeam(person),
+                        ),
+                      )
+                      .toList(),
+                ),
         ),
       ],
+    );
+  }
+}
+
+class TechnicianProfileDialog extends StatelessWidget {
+  const TechnicianProfileDialog({super.key, required this.technician});
+
+  final AdminUserProfile technician;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Technician Profile'),
+      content: SizedBox(
+        width: 430,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircleAvatar(
+              radius: 34,
+              backgroundColor: AppColors.primary.withValues(alpha: 0.12),
+              child: Text(
+                technician.initials,
+                style: const TextStyle(
+                  color: AppColors.primary,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              technician.name,
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              technician.email,
+              style: const TextStyle(color: AppColors.muted),
+            ),
+            const SizedBox(height: 18),
+            _ProfileLine(label: 'Role', value: technician.role),
+            _ProfileLine(label: 'Team', value: technician.teamLabel),
+            _ProfileLine(label: 'User ID', value: technician.uid),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
+      ],
+    );
+  }
+}
+
+class TechnicianTeamDialog extends StatefulWidget {
+  const TechnicianTeamDialog({
+    super.key,
+    required this.technician,
+    required this.teams,
+  });
+
+  final AdminUserProfile technician;
+  final List<String> teams;
+
+  @override
+  State<TechnicianTeamDialog> createState() => _TechnicianTeamDialogState();
+}
+
+class _TechnicianTeamDialogState extends State<TechnicianTeamDialog> {
+  static const _newTeamValue = '__new_team__';
+
+  late final TextEditingController _teamController;
+  late String _selectedTeam;
+
+  @override
+  void initState() {
+    super.initState();
+    final currentTeam = widget.technician.team?.trim();
+    _selectedTeam = currentTeam != null && widget.teams.contains(currentTeam)
+        ? currentTeam
+        : widget.teams.isNotEmpty
+        ? widget.teams.first
+        : _newTeamValue;
+    _teamController = TextEditingController(
+      text:
+          currentTeam != null &&
+              currentTeam.isNotEmpty &&
+              !widget.teams.contains(currentTeam)
+          ? currentTeam
+          : '',
+    );
+  }
+
+  @override
+  void dispose() {
+    _teamController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Assign to Team'),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            DropdownButtonFormField<String>(
+              initialValue: _selectedTeam,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Team',
+                prefixIcon: Icon(Icons.groups_outlined),
+              ),
+              items: [
+                for (final team in widget.teams)
+                  DropdownMenuItem(value: team, child: Text(team)),
+                const DropdownMenuItem(
+                  value: _newTeamValue,
+                  child: Text('New team'),
+                ),
+              ],
+              onChanged: (value) {
+                if (value == null) return;
+                setState(() => _selectedTeam = value);
+              },
+            ),
+            if (_selectedTeam == _newTeamValue) ...[
+              const SizedBox(height: 12),
+              TextField(
+                controller: _teamController,
+                autofocus: true,
+                textInputAction: TextInputAction.done,
+                decoration: const InputDecoration(
+                  labelText: 'New team name',
+                  prefixIcon: Icon(Icons.edit_outlined),
+                ),
+                onSubmitted: (_) => _save(context),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton.icon(
+          onPressed: () => _save(context),
+          icon: const Icon(Icons.group_add_outlined),
+          label: const Text('Save team'),
+        ),
+      ],
+    );
+  }
+
+  void _save(BuildContext context) {
+    final team = _selectedTeam == _newTeamValue
+        ? _teamController.text.trim()
+        : _selectedTeam.trim();
+    if (team.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Enter a team name.')));
+      return;
+    }
+    Navigator.pop(context, team);
+  }
+}
+
+class _ProfileLine extends StatelessWidget {
+  const _ProfileLine({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 88,
+            child: Text(label, style: const TextStyle(color: AppColors.muted)),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2782,11 +3105,6 @@ class AcceptanceView extends StatelessWidget {
               detail:
                   '${orders.where((job) => job.arrivalVerified).length} jobs verified',
               complete: orders.any((job) => job.arrivalVerified),
-            ),
-            _GateCard(
-              title: 'Material consumed/returned',
-              detail: 'Static reconciliation ready for workflow extension',
-              complete: false,
             ),
             _GateCard(
               title: 'Admin approval',
@@ -2824,6 +3142,466 @@ class AcceptanceView extends StatelessWidget {
   }
 }
 
+class BillingView extends StatefulWidget {
+  const BillingView({
+    super.key,
+    required this.orders,
+    required this.invoices,
+    required this.session,
+    required this.onSave,
+    required this.onOpen,
+  });
+
+  final List<WorkOrder> orders;
+  final List<Invoice> invoices;
+  final AuthSession session;
+  final Future<void> Function(Invoice invoice) onSave;
+  final ValueChanged<WorkOrder> onOpen;
+
+  @override
+  State<BillingView> createState() => _BillingViewState();
+}
+
+class _BillingViewState extends State<BillingView> {
+  String _query = '';
+  String _filter = 'All';
+  bool _saving = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final invoices = _filteredInvoices();
+    final outstanding = widget.invoices
+        .where(
+          (invoice) =>
+              invoice.status == InvoiceStatus.issued && !invoice.isOverdue,
+        )
+        .fold<double>(0, (sum, invoice) => sum + invoice.total);
+    final overdue = widget.invoices
+        .where((invoice) => invoice.isOverdue)
+        .toList();
+    final overdueTotal = overdue.fold<double>(
+      0,
+      (sum, invoice) => sum + invoice.total,
+    );
+    final paidTotal = widget.invoices
+        .where((invoice) => invoice.status == InvoiceStatus.paid)
+        .fold<double>(0, (sum, invoice) => sum + invoice.total);
+    final availableOrders = widget.orders.where((order) {
+      if (order.status != 'Approved') return false;
+      return !widget.invoices.any(
+        (invoice) =>
+            invoice.workOrderId == order.id &&
+            invoice.status != InvoiceStatus.voided,
+      );
+    }).toList();
+
+    return _Page(
+      children: [
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            _MetricCard(
+              icon: Icons.edit_note_outlined,
+              label: 'Drafts',
+              value:
+                  '${widget.invoices.where((invoice) => invoice.status == InvoiceStatus.draft).length}',
+              detail: 'Waiting to be issued',
+              color: AppColors.primary,
+              onTap: () => setState(() => _filter = 'Draft'),
+            ),
+            _MetricCard(
+              icon: Icons.schedule_outlined,
+              label: 'Outstanding',
+              value: _billingMoney(outstanding),
+              detail: 'Issued and not due',
+              color: AppColors.warning,
+              onTap: () => setState(() => _filter = 'Issued'),
+            ),
+            _MetricCard(
+              icon: Icons.error_outline,
+              label: 'Overdue',
+              value: _billingMoney(overdueTotal),
+              detail: '${overdue.length} overdue invoices',
+              color: AppColors.danger,
+              onTap: () => setState(() => _filter = 'Overdue'),
+            ),
+            _MetricCard(
+              icon: Icons.paid_outlined,
+              label: 'Paid',
+              value: _billingMoney(paidTotal),
+              detail: 'Recorded receipts',
+              color: AppColors.success,
+              onTap: () => setState(() => _filter = 'Paid'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 18),
+        const _Panel(
+          title: 'Invoice Process',
+          child: Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              _InvoiceStep(
+                number: '1',
+                title: 'Draft',
+                detail: 'Confirm customer, lines, tax, and due date',
+              ),
+              _InvoiceStep(
+                number: '2',
+                title: 'Issue',
+                detail: 'Lock the invoice and send the PDF',
+              ),
+              _InvoiceStep(
+                number: '3',
+                title: 'Track',
+                detail: 'Monitor outstanding and overdue invoices',
+              ),
+              _InvoiceStep(
+                number: '4',
+                title: 'Close',
+                detail: 'Record payment or void the invoice',
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        _Panel(
+          title: 'Ready for Invoicing',
+          trailing: const _StatusPill(
+            label: 'Editable rates',
+            color: AppColors.primary,
+          ),
+          child: availableOrders.isEmpty
+              ? const _EmptyState(
+                  message:
+                      'Every approved work order already has an active invoice.',
+                )
+              : Column(
+                  children: [
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Start here: create a draft invoice from an approved job. Standard Rand rates are prefilled and can be edited before saving.',
+                        style: TextStyle(color: AppColors.muted),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    for (final order in availableOrders)
+                      _BillableJobRow(
+                        order: order,
+                        onOpen: () => widget.onOpen(order),
+                        onCreate: _saving ? null : () => _createInvoice(order),
+                      ),
+                  ],
+                ),
+        ),
+        const SizedBox(height: 18),
+        _Panel(
+          title: 'Invoices',
+          trailing: Text(
+            '${invoices.length} ${invoices.length == 1 ? 'invoice' : 'invoices'}',
+            style: const TextStyle(color: AppColors.muted),
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      decoration: const InputDecoration(
+                        hintText: 'Search invoice, job, or customer',
+                        prefixIcon: Icon(Icons.search),
+                      ),
+                      onChanged: (value) => setState(() => _query = value),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  SizedBox(
+                    width: 190,
+                    child: DropdownButtonFormField<String>(
+                      initialValue: _filter,
+                      isExpanded: true,
+                      decoration: const InputDecoration(labelText: 'Status'),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'All',
+                          child: Text('All invoices'),
+                        ),
+                        DropdownMenuItem(value: 'Draft', child: Text('Draft')),
+                        DropdownMenuItem(
+                          value: 'Issued',
+                          child: Text('Issued'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'Overdue',
+                          child: Text('Overdue'),
+                        ),
+                        DropdownMenuItem(value: 'Paid', child: Text('Paid')),
+                        DropdownMenuItem(value: 'Void', child: Text('Void')),
+                      ],
+                      onChanged: (value) => setState(() => _filter = value!),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              if (invoices.isEmpty)
+                const _EmptyState(
+                  message:
+                      'No invoices match this view. Create a draft from a billing-ready job below.',
+                )
+              else
+                for (final invoice in invoices)
+                  _InvoiceRow(
+                    invoice: invoice,
+                    busy: _saving,
+                    onEdit: invoice.status == InvoiceStatus.draft
+                        ? () => _editInvoice(invoice)
+                        : null,
+                    onIssue: invoice.status == InvoiceStatus.draft
+                        ? () => _updateStatus(invoice, InvoiceStatus.issued)
+                        : null,
+                    onPaid:
+                        invoice.status == InvoiceStatus.issued ||
+                            invoice.isOverdue
+                        ? () => _updateStatus(invoice, InvoiceStatus.paid)
+                        : null,
+                    onVoid:
+                        invoice.status != InvoiceStatus.paid &&
+                            invoice.status != InvoiceStatus.voided
+                        ? () => _voidInvoice(invoice)
+                        : null,
+                    onPdf: () => _savePdf(invoice),
+                    onEmail:
+                        invoice.status == InvoiceStatus.issued ||
+                            invoice.isOverdue
+                        ? () => _emailInvoice(invoice)
+                        : null,
+                    onOpenJob: () => _openInvoiceJob(invoice),
+                  ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  List<Invoice> _filteredInvoices() {
+    final query = _query.trim().toLowerCase();
+    return widget.invoices.where((invoice) {
+      final matchesStatus = switch (_filter) {
+        'Draft' => invoice.status == InvoiceStatus.draft,
+        'Issued' =>
+          invoice.status == InvoiceStatus.issued && !invoice.isOverdue,
+        'Overdue' => invoice.isOverdue,
+        'Paid' => invoice.status == InvoiceStatus.paid,
+        'Void' => invoice.status == InvoiceStatus.voided,
+        _ => true,
+      };
+      if (!matchesStatus) return false;
+      if (query.isEmpty) return true;
+      return [
+        invoice.number,
+        invoice.workOrderId,
+        invoice.customerName,
+      ].any((value) => value.toLowerCase().contains(query));
+    }).toList();
+  }
+
+  Future<void> _createInvoice(WorkOrder order) async {
+    final now = DateTime.now();
+    final serial = now.millisecondsSinceEpoch.toString().substring(6);
+    final draft = Invoice(
+      id: 'invoice-$serial',
+      number: 'INV-${now.year}-$serial',
+      workOrderId: order.id,
+      customerName: order.customerName?.trim().isNotEmpty == true
+          ? order.customerName!.trim()
+          : order.site,
+      customerEmail: '',
+      customerAddress: order.address,
+      items: [
+        InvoiceLineItem(
+          description: order.scope,
+          quantity: 1,
+          unitPrice: _standardBillingRate(order),
+        ),
+      ],
+      taxRate: _standardBillingTaxRate,
+      status: InvoiceStatus.draft,
+      createdAt: now,
+      dueAt: now.add(const Duration(days: 30)),
+      createdBy: widget.session.uid,
+    );
+    await _showEditor(draft);
+  }
+
+  Future<void> _editInvoice(Invoice invoice) => _showEditor(invoice);
+
+  Future<void> _showEditor(Invoice invoice) async {
+    final result = await showDialog<Invoice>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => InvoiceEditorDialog(invoice: invoice),
+    );
+    if (result == null) return;
+    await _persist(result, '${result.number} saved as a draft.');
+  }
+
+  Future<void> _updateStatus(Invoice invoice, InvoiceStatus status) async {
+    if (status == InvoiceStatus.issued &&
+        (invoice.customerEmail.trim().isEmpty ||
+            invoice.items.isEmpty ||
+            invoice.total <= 0)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Complete the customer email, line items, and total before issuing.',
+          ),
+        ),
+      );
+      return;
+    }
+    final now = DateTime.now();
+    final updated = invoice.copyWith(
+      status: status,
+      issuedAt: status == InvoiceStatus.issued ? now : null,
+      paidAt: status == InvoiceStatus.paid ? now : null,
+      updatedAt: now,
+    );
+    final message = switch (status) {
+      InvoiceStatus.issued => '${invoice.number} issued.',
+      InvoiceStatus.paid => '${invoice.number} marked as paid.',
+      _ => '${invoice.number} updated.',
+    };
+    await _persist(updated, message);
+  }
+
+  Future<void> _voidInvoice(Invoice invoice) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Void invoice?'),
+        content: Text(
+          '${invoice.number} will remain in the audit history but will no longer be collectible.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Void invoice'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final now = DateTime.now();
+    await _persist(
+      invoice.copyWith(
+        status: InvoiceStatus.voided,
+        voidedAt: now,
+        updatedAt: now,
+      ),
+      '${invoice.number} voided.',
+    );
+  }
+
+  Future<void> _persist(Invoice invoice, String success) async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      await widget.onSave(invoice);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(success)));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_invoiceSaveErrorMessage(error))));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _savePdf(Invoice invoice) async {
+    final order = _orderFor(invoice);
+    if (order == null) return;
+    try {
+      final file = await _saveInvoicePdfAs(invoice, order);
+      if (!mounted || file == null) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Invoice saved to ${file.path}')));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'The invoice PDF could not be saved. $_supportContactMessage',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _emailInvoice(Invoice invoice) async {
+    final order = _orderFor(invoice);
+    if (order == null) return;
+    if (invoice.customerEmail.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Add a customer email before sending.')),
+      );
+      return;
+    }
+    try {
+      final attachment = await _writeInvoicePdfAttachment(invoice, order);
+      await _openOutlookDraftWithAttachment(
+        recipient: invoice.customerEmail,
+        subject: 'Invoice ${invoice.number} - PHEPHA MV ISDP',
+        body:
+            'Dear ${invoice.customerName},\r\n\r\n'
+            'Please find attached invoice ${invoice.number} for ${_billingMoney(invoice.total)}. '
+            'Payment is due by ${_dateLabel(invoice.dueAt)}.\r\n\r\n'
+            'Please use ${invoice.number} as the payment reference.\r\n\r\n'
+            'Regards,\r\nPHEPHA MV ISDP',
+        attachmentPath: attachment.path,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invoice email draft opened in Outlook.')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'The invoice email could not be opened. $_supportContactMessage',
+          ),
+        ),
+      );
+    }
+  }
+
+  void _openInvoiceJob(Invoice invoice) {
+    final order = _orderFor(invoice);
+    if (order != null) widget.onOpen(order);
+  }
+
+  WorkOrder? _orderFor(Invoice invoice) {
+    for (final order in widget.orders) {
+      if (order.id == invoice.workOrderId) return order;
+    }
+    return null;
+  }
+}
+
 class AnalyticsView extends StatelessWidget {
   const AnalyticsView({super.key, required this.orders});
 
@@ -2844,7 +3622,7 @@ class AnalyticsView extends StatelessWidget {
                 icon: Icons.work_outline,
                 label: 'Total jobs',
                 value: '${orders.length}',
-                detail: 'All Firestore work orders',
+                detail: 'All work orders',
                 color: AppColors.primary,
               ),
               _MetricCard(
@@ -3089,10 +3867,9 @@ class _CreateJobDialogState extends State<CreateJobDialog> {
         scope: scope,
         sla: 'Due by ${_dateLabel(_dueAt)} at ${_timeLabel(_dueAt)}',
         siteCode: 'SITE-$nextNumber',
-        status: 'Assigned to Supervisor',
+        status: 'New',
         priority: _priority,
         dueAt: _dueAt,
-        supervisor: demoSupervisors.first.name,
       ),
     );
   }
@@ -3303,7 +4080,14 @@ class _EmptyTechnicianSearchResult extends StatelessWidget {
 abstract class AdminRepository {
   Future<AuthSession> signIn({required String email, required String password});
   Future<List<WorkOrder>> fetchWorkOrders(AuthSession session);
+  Future<List<Invoice>> fetchInvoices(AuthSession session);
+  Future<void> saveInvoice(AuthSession session, Invoice invoice);
   Future<List<AdminUserProfile>> fetchTechnicians(AuthSession session);
+  Future<void> updateTechnicianTeam(
+    AuthSession session,
+    AdminUserProfile technician, {
+    required String team,
+  });
   Future<void> createWorkOrder(AuthSession session, WorkOrder order);
   Future<void> updateWorkOrder(
     AuthSession session,
@@ -3386,6 +4170,45 @@ class RestAdminRepository implements AdminRepository {
   }
 
   @override
+  Future<List<Invoice>> fetchInvoices(AuthSession session) async {
+    final invoices = <Invoice>[];
+    String? pageToken;
+    do {
+      final query = <String, dynamic>{'pageSize': '100'};
+      if (pageToken != null) query['pageToken'] = pageToken;
+      final uri = _documentsUri('/invoices', query: query);
+      final response = await _client.get(uri, headers: _headers(session));
+      final body = _decode(response);
+      if (response.statusCode >= 400) throw ApiException.fromBody(body);
+      final documents = body['documents'] as List<dynamic>? ?? const [];
+      invoices.addAll(
+        documents.whereType<Map<String, dynamic>>().map(Invoice.fromDocument),
+      );
+      pageToken = body['nextPageToken'] as String?;
+    } while (pageToken != null && pageToken.isNotEmpty);
+    invoices.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return invoices;
+  }
+
+  @override
+  Future<void> saveInvoice(AuthSession session, Invoice invoice) async {
+    final uri = _documentsUri('/invoices/${invoice.id}');
+    final response = await _client.patch(
+      uri,
+      headers: _headers(session),
+      body: jsonEncode({'fields': invoice.toFields()}),
+    );
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw const ApiException(
+        'Invoice saving is not enabled for this admin account yet. Deploy the latest access rules and confirm this user has the admin role.',
+      );
+    }
+    if (response.statusCode >= 400) {
+      throw ApiException.fromBody(_decode(response));
+    }
+  }
+
+  @override
   Future<List<AdminUserProfile>> fetchTechnicians(AuthSession session) async {
     final users = <AdminUserProfile>[];
     String? pageToken;
@@ -3409,6 +4232,28 @@ class RestAdminRepository implements AdminRepository {
 
     users.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     return users;
+  }
+
+  @override
+  Future<void> updateTechnicianTeam(
+    AuthSession session,
+    AdminUserProfile technician, {
+    required String team,
+  }) async {
+    final uri = _documentsUri(
+      '/users/${technician.uid}',
+      query: const {'updateMask.fieldPaths': 'team'},
+    );
+    final response = await _client.patch(
+      uri,
+      headers: _headers(session),
+      body: jsonEncode({
+        'fields': {'team': _stringField(team.trim())},
+      }),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException.fromBody(_decode(response));
+    }
   }
 
   @override
@@ -3638,6 +4483,28 @@ class AdminUserProfile {
   final String role;
   final String? team;
 
+  String get teamLabel => team?.isNotEmpty == true ? team! : 'Unassigned team';
+
+  String get initials {
+    final parts = name
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) return '?';
+    return parts.take(2).map((part) => part[0].toUpperCase()).join();
+  }
+
+  AdminUserProfile copyWith({String? team}) {
+    return AdminUserProfile(
+      uid: uid,
+      email: email,
+      name: name,
+      role: role,
+      team: team ?? this.team,
+    );
+  }
+
   factory AdminUserProfile.fromFirestoreDocument(
     Map<String, dynamic> document,
   ) {
@@ -3699,6 +4566,199 @@ class ApiException implements Exception {
 
   @override
   String toString() => message;
+}
+
+enum InvoiceStatus {
+  draft('Draft'),
+  issued('Issued'),
+  paid('Paid'),
+  voided('Void');
+
+  const InvoiceStatus(this.label);
+  final String label;
+
+  static InvoiceStatus fromString(String? value) {
+    return InvoiceStatus.values.firstWhere(
+      (status) => status.name == value,
+      orElse: () => InvoiceStatus.draft,
+    );
+  }
+}
+
+class InvoiceLineItem {
+  const InvoiceLineItem({
+    required this.description,
+    required this.quantity,
+    required this.unitPrice,
+  });
+
+  final String description;
+  final double quantity;
+  final double unitPrice;
+
+  double get total => quantity * unitPrice;
+
+  Map<String, Object> toFieldValue() => {
+    'mapValue': {
+      'fields': {
+        'description': _stringField(description),
+        'quantity': _doubleField(quantity),
+        'unitPrice': _doubleField(unitPrice),
+      },
+    },
+  };
+
+  factory InvoiceLineItem.fromFieldValue(Object? value) {
+    final mapValue = value is Map<String, dynamic>
+        ? value['mapValue'] as Map<String, dynamic>?
+        : null;
+    final fields = mapValue?['fields'] as Map<String, dynamic>? ?? const {};
+    return InvoiceLineItem(
+      description: _fieldString(fields['description']) ?? 'Service',
+      quantity: _fieldDouble(fields['quantity']) ?? 1,
+      unitPrice: _fieldDouble(fields['unitPrice']) ?? 0,
+    );
+  }
+}
+
+class Invoice {
+  const Invoice({
+    required this.id,
+    required this.number,
+    required this.workOrderId,
+    required this.customerName,
+    required this.customerEmail,
+    required this.customerAddress,
+    required this.items,
+    required this.taxRate,
+    required this.status,
+    required this.createdAt,
+    required this.dueAt,
+    required this.createdBy,
+    this.notes = '',
+    this.issuedAt,
+    this.paidAt,
+    this.voidedAt,
+    this.updatedAt,
+  });
+
+  final String id;
+  final String number;
+  final String workOrderId;
+  final String customerName;
+  final String customerEmail;
+  final String customerAddress;
+  final List<InvoiceLineItem> items;
+  final double taxRate;
+  final InvoiceStatus status;
+  final DateTime createdAt;
+  final DateTime dueAt;
+  final String createdBy;
+  final String notes;
+  final DateTime? issuedAt;
+  final DateTime? paidAt;
+  final DateTime? voidedAt;
+  final DateTime? updatedAt;
+
+  double get subtotal => items.fold(0, (sum, item) => sum + item.total);
+  double get taxAmount => subtotal * taxRate;
+  double get total => subtotal + taxAmount;
+  bool get isOverdue =>
+      status == InvoiceStatus.issued && dueAt.isBefore(DateTime.now());
+  String get displayStatus => isOverdue ? 'Overdue' : status.label;
+
+  Invoice copyWith({
+    String? number,
+    String? customerName,
+    String? customerEmail,
+    String? customerAddress,
+    List<InvoiceLineItem>? items,
+    double? taxRate,
+    InvoiceStatus? status,
+    DateTime? dueAt,
+    String? notes,
+    DateTime? issuedAt,
+    DateTime? paidAt,
+    DateTime? voidedAt,
+    DateTime? updatedAt,
+  }) {
+    return Invoice(
+      id: id,
+      number: number ?? this.number,
+      workOrderId: workOrderId,
+      customerName: customerName ?? this.customerName,
+      customerEmail: customerEmail ?? this.customerEmail,
+      customerAddress: customerAddress ?? this.customerAddress,
+      items: items ?? this.items,
+      taxRate: taxRate ?? this.taxRate,
+      status: status ?? this.status,
+      createdAt: createdAt,
+      dueAt: dueAt ?? this.dueAt,
+      createdBy: createdBy,
+      notes: notes ?? this.notes,
+      issuedAt: issuedAt ?? this.issuedAt,
+      paidAt: paidAt ?? this.paidAt,
+      voidedAt: voidedAt ?? this.voidedAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
+  Map<String, Object> toFields() {
+    final fields = <String, Object>{
+      'number': _stringField(number),
+      'workOrderId': _stringField(workOrderId),
+      'customerName': _stringField(customerName),
+      'customerEmail': _stringField(customerEmail),
+      'customerAddress': _stringField(customerAddress),
+      'items': _arrayField(items.map((item) => item.toFieldValue()).toList()),
+      'taxRate': _doubleField(taxRate),
+      'subtotal': _doubleField(subtotal),
+      'taxAmount': _doubleField(taxAmount),
+      'total': _doubleField(total),
+      'status': _stringField(status.name),
+      'createdAt': _timestampField(createdAt),
+      'dueAt': _timestampField(dueAt),
+      'createdBy': _stringField(createdBy),
+      'notes': _stringField(notes),
+      'updatedAt': _timestampField(updatedAt ?? DateTime.now()),
+    };
+    if (issuedAt != null) fields['issuedAt'] = _timestampField(issuedAt!);
+    if (paidAt != null) fields['paidAt'] = _timestampField(paidAt!);
+    if (voidedAt != null) fields['voidedAt'] = _timestampField(voidedAt!);
+    return fields;
+  }
+
+  factory Invoice.fromDocument(Map<String, dynamic> document) {
+    final name = document['name'] as String? ?? '';
+    final id = name.split('/').last;
+    final fields = document['fields'] as Map<String, dynamic>? ?? const {};
+    final array = fields['items'] is Map<String, dynamic>
+        ? (fields['items'] as Map<String, dynamic>)['arrayValue']
+              as Map<String, dynamic>?
+        : null;
+    final values = array?['values'] as List<dynamic>? ?? const [];
+    return Invoice(
+      id: id,
+      number: _fieldString(fields['number']) ?? id,
+      workOrderId: _fieldString(fields['workOrderId']) ?? '',
+      customerName: _fieldString(fields['customerName']) ?? 'Customer',
+      customerEmail: _fieldString(fields['customerEmail']) ?? '',
+      customerAddress: _fieldString(fields['customerAddress']) ?? '',
+      items: values.map(InvoiceLineItem.fromFieldValue).toList(),
+      taxRate: _fieldDouble(fields['taxRate']) ?? _standardBillingTaxRate,
+      status: InvoiceStatus.fromString(_fieldString(fields['status'])),
+      createdAt: _fieldDate(fields['createdAt']) ?? DateTime.now(),
+      dueAt:
+          _fieldDate(fields['dueAt']) ??
+          DateTime.now().add(const Duration(days: 30)),
+      createdBy: _fieldString(fields['createdBy']) ?? 'admin',
+      notes: _fieldString(fields['notes']) ?? '',
+      issuedAt: _fieldDate(fields['issuedAt']),
+      paidAt: _fieldDate(fields['paidAt']),
+      voidedAt: _fieldDate(fields['voidedAt']),
+      updatedAt: _fieldDate(fields['updatedAt']),
+    );
+  }
 }
 
 class WorkOrder {
@@ -3996,26 +5056,27 @@ enum AdminSection {
   jobChats('Job chats', Icons.forum_outlined),
   teams('Field teams', Icons.people_alt_outlined),
   acceptance('Acceptance', Icons.fact_check_outlined),
+  billing('Billing & Invoices', Icons.receipt_long_outlined),
   analytics('Analytics', Icons.query_stats_outlined);
 
   const AdminSection(this.label, this.icon);
   final String label;
   final IconData icon;
+
+  String get subtitle {
+    return switch (this) {
+      AdminSection.dashboard => 'Overview and alerts',
+      AdminSection.workOrders => 'Create and manage jobs',
+      AdminSection.jobChats => 'Live site conversations',
+      AdminSection.teams => 'Assign field technicians',
+      AdminSection.acceptance => 'Review submitted work',
+      AdminSection.billing => 'Draft, issue, and track',
+      AdminSection.analytics => 'Performance reports',
+    };
+  }
 }
 
 enum OrderAction { accept, assign, markOnsite, markSubmitted, review, approve }
-
-class DemoPerson {
-  const DemoPerson({
-    required this.name,
-    required this.email,
-    required this.team,
-  });
-
-  final String name;
-  final String email;
-  final String team;
-}
 
 class PersonAnalytics {
   const PersonAnalytics(
@@ -4038,32 +5099,6 @@ class PersonAnalytics {
   final int approved;
   final int urgent;
 }
-
-const demoSupervisors = [
-  DemoPerson(
-    name: 'Mandla Dlamini',
-    email: 'mandla@commit.co.sz',
-    team: 'North Region',
-  ),
-];
-
-const demoTechnicians = [
-  DemoPerson(
-    name: 'Sibusiso M.',
-    email: 'sibusiso@commit.co.sz',
-    team: 'Field Team A',
-  ),
-  DemoPerson(
-    name: 'Thabo M.',
-    email: 'thabo.tech@commit.co.sz',
-    team: 'Field Team B',
-  ),
-  DemoPerson(
-    name: 'Lindiwe S.',
-    email: 'lindiwe.tech@commit.co.sz',
-    team: 'Field Team C',
-  ),
-];
 
 class _Sidebar extends StatelessWidget {
   const _Sidebar({
@@ -4128,6 +5163,7 @@ class _Sidebar extends StatelessWidget {
             _NavItem(
               icon: section.icon,
               label: section.label,
+              subtitle: section.subtitle,
               selected: section == selected,
               onTap: () => onSelected(section),
             ),
@@ -4150,12 +5186,14 @@ class _NavItem extends StatelessWidget {
   const _NavItem({
     required this.icon,
     required this.label,
+    required this.subtitle,
     required this.selected,
     required this.onTap,
   });
 
   final IconData icon;
   final String label;
+  final String subtitle;
   final bool selected;
   final VoidCallback onTap;
 
@@ -4183,6 +5221,12 @@ class _NavItem extends StatelessWidget {
             fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
           ),
         ),
+        subtitle: Text(
+          subtitle,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 11, color: AppColors.muted),
+        ),
       ),
     );
   }
@@ -4197,6 +5241,7 @@ class _TopBar extends StatelessWidget {
     required this.notificationCount,
     required this.onNotifications,
     this.onBack,
+    this.backLabel,
   });
 
   final String title;
@@ -4206,6 +5251,7 @@ class _TopBar extends StatelessWidget {
   final int notificationCount;
   final VoidCallback onNotifications;
   final VoidCallback? onBack;
+  final String? backLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -4214,12 +5260,12 @@ class _TopBar extends StatelessWidget {
       child: Row(
         children: [
           if (onBack != null) ...[
-            IconButton.filledTonal(
+            FilledButton.tonalIcon(
               onPressed: onBack,
-              tooltip: 'Back to work orders',
+              label: Text(backLabel ?? 'Back'),
               icon: const Icon(Icons.arrow_back),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 14),
           ],
           Expanded(
             child: Text(
@@ -4229,7 +5275,7 @@ class _TopBar extends StatelessWidget {
           ),
           IconButton.filledTonal(
             onPressed: isSyncing ? null : onRefresh,
-            tooltip: 'Refresh Firestore data',
+            tooltip: 'Refresh data',
             icon: isSyncing
                 ? const _AnimatedLogoLoader(size: 24, compact: true)
                 : const Icon(Icons.refresh),
@@ -4519,18 +5565,30 @@ class _MetricCard extends StatelessWidget {
                     children: [
                       Text(
                         label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(color: AppColors.muted),
                       ),
                       const SizedBox(height: 6),
-                      Text(
-                        value,
-                        style: const TextStyle(
-                          fontSize: 25,
-                          fontWeight: FontWeight.w900,
+                      SizedBox(
+                        width: double.infinity,
+                        height: 32,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            value,
+                            maxLines: 1,
+                            style: const TextStyle(
+                              fontSize: 25,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
                         ),
                       ),
                       Text(
                         detail,
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(color: color),
                       ),
@@ -4729,6 +5787,601 @@ class _ApprovalRow extends StatelessWidget {
   }
 }
 
+class _InvoiceStep extends StatelessWidget {
+  const _InvoiceStep({
+    required this.number,
+    required this.title,
+    required this.detail,
+  });
+
+  final String number;
+  final String title;
+  final String detail;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 220,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CircleAvatar(
+            radius: 18,
+            backgroundColor: AppColors.primary,
+            foregroundColor: Colors.white,
+            child: Text(number),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.w900),
+                ),
+                Text(
+                  detail,
+                  style: const TextStyle(color: AppColors.muted, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+enum _InvoiceMenuAction { edit, issue, paid, pdf, email, voidInvoice }
+
+class _InvoiceRow extends StatelessWidget {
+  const _InvoiceRow({
+    required this.invoice,
+    required this.busy,
+    required this.onEdit,
+    required this.onIssue,
+    required this.onPaid,
+    required this.onVoid,
+    required this.onPdf,
+    required this.onEmail,
+    required this.onOpenJob,
+  });
+
+  final Invoice invoice;
+  final bool busy;
+  final VoidCallback? onEdit;
+  final VoidCallback? onIssue;
+  final VoidCallback? onPaid;
+  final VoidCallback? onVoid;
+  final VoidCallback onPdf;
+  final VoidCallback? onEmail;
+  final VoidCallback onOpenJob;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (invoice.displayStatus) {
+      'Paid' => AppColors.success,
+      'Overdue' => AppColors.danger,
+      'Issued' => AppColors.warning,
+      'Void' => AppColors.muted,
+      _ => AppColors.primary,
+    };
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(vertical: 4),
+      onTap: onOpenJob,
+      leading: _IconPill(icon: Icons.receipt_long_outlined, color: color),
+      title: Text(
+        '${invoice.number} - ${invoice.customerName}',
+        style: const TextStyle(fontWeight: FontWeight.w900),
+      ),
+      subtitle: Text(
+        '${invoice.workOrderId} | Due ${_dateLabel(invoice.dueAt)}',
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            _billingMoney(invoice.total),
+            style: const TextStyle(fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(width: 10),
+          _StatusPill(label: invoice.displayStatus, color: color),
+          const SizedBox(width: 4),
+          PopupMenuButton<_InvoiceMenuAction>(
+            enabled: !busy,
+            tooltip: 'Invoice actions',
+            onSelected: (action) {
+              switch (action) {
+                case _InvoiceMenuAction.edit:
+                  onEdit?.call();
+                case _InvoiceMenuAction.issue:
+                  onIssue?.call();
+                case _InvoiceMenuAction.paid:
+                  onPaid?.call();
+                case _InvoiceMenuAction.pdf:
+                  onPdf();
+                case _InvoiceMenuAction.email:
+                  onEmail?.call();
+                case _InvoiceMenuAction.voidInvoice:
+                  onVoid?.call();
+              }
+            },
+            itemBuilder: (context) => [
+              if (onEdit != null)
+                const PopupMenuItem(
+                  value: _InvoiceMenuAction.edit,
+                  child: Text('Edit draft'),
+                ),
+              if (onIssue != null)
+                const PopupMenuItem(
+                  value: _InvoiceMenuAction.issue,
+                  child: Text('Issue invoice'),
+                ),
+              if (onPaid != null)
+                const PopupMenuItem(
+                  value: _InvoiceMenuAction.paid,
+                  child: Text('Mark as paid'),
+                ),
+              const PopupMenuItem(
+                value: _InvoiceMenuAction.pdf,
+                child: Text('Save PDF'),
+              ),
+              if (onEmail != null)
+                const PopupMenuItem(
+                  value: _InvoiceMenuAction.email,
+                  child: Text('Email invoice'),
+                ),
+              if (onVoid != null)
+                const PopupMenuItem(
+                  value: _InvoiceMenuAction.voidInvoice,
+                  child: Text('Void invoice'),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BillableJobRow extends StatelessWidget {
+  const _BillableJobRow({
+    required this.order,
+    required this.onOpen,
+    required this.onCreate,
+  });
+
+  final WorkOrder order;
+  final VoidCallback onOpen;
+  final VoidCallback? onCreate;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(vertical: 4),
+      onTap: onOpen,
+      leading: _IconPill(
+        icon: Icons.check_circle_outline,
+        color: AppColors.success,
+      ),
+      title: Text(
+        '${order.id} - ${order.site}',
+        style: const TextStyle(fontWeight: FontWeight.w900),
+      ),
+      subtitle: Text(order.scope, overflow: TextOverflow.ellipsis),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'From ${_billingMoney(_standardBillingRate(order))}',
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(width: 10),
+          FilledButton.icon(
+            onPressed: onCreate,
+            icon: const Icon(Icons.add),
+            label: const Text('Create draft'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class InvoiceEditorDialog extends StatefulWidget {
+  const InvoiceEditorDialog({super.key, required this.invoice});
+
+  final Invoice invoice;
+
+  @override
+  State<InvoiceEditorDialog> createState() => _InvoiceEditorDialogState();
+}
+
+class _InvoiceEditorDialogState extends State<InvoiceEditorDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _number;
+  late final TextEditingController _customer;
+  late final TextEditingController _email;
+  late final TextEditingController _address;
+  late final TextEditingController _taxRate;
+  late final TextEditingController _notes;
+  late DateTime _dueAt;
+  late final List<_InvoiceItemControllers> _items;
+
+  @override
+  void initState() {
+    super.initState();
+    final invoice = widget.invoice;
+    _number = TextEditingController(text: invoice.number);
+    _customer = TextEditingController(text: invoice.customerName);
+    _email = TextEditingController(text: invoice.customerEmail);
+    _address = TextEditingController(text: invoice.customerAddress);
+    _taxRate = TextEditingController(
+      text: (invoice.taxRate * 100).toStringAsFixed(0),
+    );
+    _notes = TextEditingController(text: invoice.notes);
+    _dueAt = invoice.dueAt;
+    _items = invoice.items.map(_InvoiceItemControllers.fromItem).toList();
+    if (_items.isEmpty) _items.add(_InvoiceItemControllers.empty());
+  }
+
+  @override
+  void dispose() {
+    _number.dispose();
+    _customer.dispose();
+    _email.dispose();
+    _address.dispose();
+    _taxRate.dispose();
+    _notes.dispose();
+    for (final item in _items) {
+      item.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final subtotal = _parsedItems().fold<double>(
+      0,
+      (sum, item) => sum + item.total,
+    );
+    final taxRate = (double.tryParse(_taxRate.text) ?? 0) / 100;
+    final tax = subtotal * taxRate;
+    return AlertDialog(
+      title: Text('Invoice draft - ${widget.invoice.workOrderId}'),
+      content: SizedBox(
+        width: 860,
+        height: 610,
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(child: _requiredField(_number, 'Invoice number')),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: InkWell(
+                        onTap: _pickDueDate,
+                        child: InputDecorator(
+                          decoration: const InputDecoration(
+                            labelText: 'Payment due date',
+                            suffixIcon: Icon(Icons.calendar_today_outlined),
+                          ),
+                          child: Text(_dateLabel(_dueAt)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(child: _requiredField(_customer, 'Customer name')),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _email,
+                        decoration: const InputDecoration(
+                          labelText: 'Customer email',
+                        ),
+                        validator: (value) {
+                          final text = value?.trim() ?? '';
+                          if (text.isEmpty) {
+                            return 'Customer email is required.';
+                          }
+                          if (!text.contains('@')) {
+                            return 'Enter a valid email.';
+                          }
+                          return null;
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _requiredField(_address, 'Billing address', maxLines: 2),
+                const SizedBox(height: 18),
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Line Items',
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: () => setState(
+                        () => _items.add(_InvoiceItemControllers.empty()),
+                      ),
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add line'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                for (var index = 0; index < _items.length; index++)
+                  _itemRow(index),
+                const SizedBox(height: 12),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _notes,
+                        maxLines: 3,
+                        decoration: const InputDecoration(
+                          labelText: 'Payment terms or notes',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    SizedBox(
+                      width: 280,
+                      child: Column(
+                        children: [
+                          TextFormField(
+                            controller: _taxRate,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: const InputDecoration(
+                              labelText: 'Tax rate (%)',
+                              suffixText: '%',
+                            ),
+                            onChanged: (_) => setState(() {}),
+                            validator: (value) {
+                              final rate = double.tryParse(value ?? '');
+                              if (rate == null || rate < 0 || rate > 100) {
+                                return 'Enter a rate from 0 to 100.';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 10),
+                          _InvoiceTotalLine(
+                            'Subtotal',
+                            _billingMoney(subtotal),
+                          ),
+                          _InvoiceTotalLine('Tax', _billingMoney(tax)),
+                          _InvoiceTotalLine(
+                            'Total',
+                            _billingMoney(subtotal + tax),
+                            strong: true,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton.icon(
+          onPressed: _save,
+          icon: const Icon(Icons.save_outlined),
+          label: const Text('Save draft'),
+        ),
+      ],
+    );
+  }
+
+  Widget _requiredField(
+    TextEditingController controller,
+    String label, {
+    int maxLines = 1,
+  }) {
+    return TextFormField(
+      controller: controller,
+      maxLines: maxLines,
+      decoration: InputDecoration(labelText: label),
+      validator: (value) =>
+          value == null || value.trim().isEmpty ? '$label is required.' : null,
+    );
+  }
+
+  Widget _itemRow(int index) {
+    final item = _items[index];
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          Expanded(child: _requiredField(item.description, 'Description')),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 105,
+            child: TextFormField(
+              controller: item.quantity,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: const InputDecoration(labelText: 'Quantity'),
+              onChanged: (_) => setState(() {}),
+              validator: _positiveNumberValidator,
+            ),
+          ),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 150,
+            child: TextFormField(
+              controller: item.unitPrice,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: const InputDecoration(
+                labelText: 'Unit price',
+                prefixText: 'R ',
+              ),
+              onChanged: (_) => setState(() {}),
+              validator: _positiveNumberValidator,
+            ),
+          ),
+          IconButton(
+            tooltip: 'Remove line',
+            onPressed: _items.length == 1
+                ? null
+                : () => setState(() {
+                    _items.removeAt(index).dispose();
+                  }),
+            icon: const Icon(Icons.delete_outline),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String? _positiveNumberValidator(String? value) {
+    final number = double.tryParse(value ?? '');
+    return number == null || number <= 0 ? 'Enter a value above zero.' : null;
+  }
+
+  List<InvoiceLineItem> _parsedItems() {
+    return _items
+        .map(
+          (item) => InvoiceLineItem(
+            description: item.description.text.trim(),
+            quantity: double.tryParse(item.quantity.text) ?? 0,
+            unitPrice: double.tryParse(item.unitPrice.text) ?? 0,
+          ),
+        )
+        .toList();
+  }
+
+  Future<void> _pickDueDate() async {
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: _dueAt,
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 730)),
+    );
+    if (selected != null) setState(() => _dueAt = selected);
+  }
+
+  void _save() {
+    if (!_formKey.currentState!.validate()) return;
+    Navigator.pop(
+      context,
+      widget.invoice.copyWith(
+        number: _number.text.trim(),
+        customerName: _customer.text.trim(),
+        customerEmail: _email.text.trim(),
+        customerAddress: _address.text.trim(),
+        items: _parsedItems(),
+        taxRate: (double.parse(_taxRate.text) / 100),
+        dueAt: _dueAt,
+        notes: _notes.text.trim(),
+        updatedAt: DateTime.now(),
+      ),
+    );
+  }
+}
+
+class _InvoiceItemControllers {
+  _InvoiceItemControllers({
+    required this.description,
+    required this.quantity,
+    required this.unitPrice,
+  });
+
+  factory _InvoiceItemControllers.fromItem(InvoiceLineItem item) {
+    return _InvoiceItemControllers(
+      description: TextEditingController(text: item.description),
+      quantity: TextEditingController(text: item.quantity.toString()),
+      unitPrice: TextEditingController(text: item.unitPrice.toStringAsFixed(2)),
+    );
+  }
+
+  factory _InvoiceItemControllers.empty() {
+    return _InvoiceItemControllers(
+      description: TextEditingController(),
+      quantity: TextEditingController(text: '1'),
+      unitPrice: TextEditingController(text: '0.00'),
+    );
+  }
+
+  final TextEditingController description;
+  final TextEditingController quantity;
+  final TextEditingController unitPrice;
+
+  void dispose() {
+    description.dispose();
+    quantity.dispose();
+    unitPrice.dispose();
+  }
+}
+
+class _InvoiceTotalLine extends StatelessWidget {
+  const _InvoiceTotalLine(this.label, this.value, {this.strong = false});
+
+  final String label;
+  final String value;
+  final bool strong;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          Expanded(child: Text(label)),
+          Text(
+            value,
+            style: TextStyle(
+              fontWeight: strong ? FontWeight.w900 : FontWeight.w600,
+              fontSize: strong ? 17 : null,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+const double _standardBillingTaxRate = 0.15;
+
+double _standardBillingRate(WorkOrder order) {
+  return switch (order.priority) {
+    Priority.critical => 2500,
+    Priority.high => 1800,
+    Priority.low => 1200,
+  };
+}
+
+String _billingMoney(num value) => 'R ${value.toStringAsFixed(2)}';
+
 class _InfoTile extends StatelessWidget {
   const _InfoTile(this.label, this.value, this.icon);
 
@@ -4816,26 +6469,44 @@ class _GateCard extends StatelessWidget {
 
 class _PersonCard extends StatelessWidget {
   const _PersonCard({
-    required this.name,
-    required this.email,
-    required this.team,
+    required this.person,
+    required this.onViewProfile,
+    required this.onChangeTeam,
   });
 
-  final String name;
-  final String email;
-  final String team;
+  final AdminUserProfile person;
+  final VoidCallback onViewProfile;
+  final VoidCallback onChangeTeam;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 300,
+      width: 360,
       child: ListTile(
         leading: _IconPill(
           icon: Icons.person_outline,
           color: AppColors.primary,
         ),
-        title: Text(name, style: const TextStyle(fontWeight: FontWeight.w900)),
-        subtitle: Text('$team\n$email'),
+        title: Text(
+          person.name,
+          style: const TextStyle(fontWeight: FontWeight.w900),
+        ),
+        subtitle: Text('${person.teamLabel}\n${person.email}'),
+        trailing: Wrap(
+          spacing: 4,
+          children: [
+            IconButton(
+              tooltip: 'View profile',
+              onPressed: onViewProfile,
+              icon: const Icon(Icons.badge_outlined),
+            ),
+            IconButton(
+              tooltip: 'Assign to team',
+              onPressed: onChangeTeam,
+              icon: const Icon(Icons.groups_outlined),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -5161,6 +6832,16 @@ String _friendlyError(Object error) {
   return 'This could not be completed right now. Please try again. $_supportContactMessage';
 }
 
+String _invoiceSaveErrorMessage(Object error) {
+  final raw = error is ApiException ? error.message.trim() : '';
+  if (raw.isNotEmpty &&
+      !raw.contains('PERMISSION_DENIED') &&
+      !raw.contains('INVALID_ARGUMENT')) {
+    return raw;
+  }
+  return 'The invoice could not be saved. Confirm this admin account has invoice access, then try again. $_supportContactMessage';
+}
+
 String displayPersonName(String? value) {
   final raw = value?.trim();
   if (raw == null || raw.isEmpty) return '';
@@ -5249,6 +6930,17 @@ int? _fieldInt(Object? field) {
   return null;
 }
 
+double? _fieldDouble(Object? field) {
+  if (field is! Map<String, dynamic>) return null;
+  final doubleValue = field['doubleValue'];
+  if (doubleValue is num) return doubleValue.toDouble();
+  if (doubleValue is String) return double.tryParse(doubleValue);
+  final integerValue = field['integerValue'];
+  if (integerValue is num) return integerValue.toDouble();
+  if (integerValue is String) return double.tryParse(integerValue);
+  return null;
+}
+
 DateTime? _fieldDate(Object? field) {
   if (field is! Map<String, dynamic>) return null;
   final value =
@@ -5282,6 +6974,7 @@ Map<String, String> _fieldStringMap(Object? field) {
 
 Map<String, Object> _stringField(String value) => {'stringValue': value};
 Map<String, Object> _boolField(bool value) => {'booleanValue': value};
+Map<String, Object> _doubleField(double value) => {'doubleValue': value};
 Map<String, Object> _timestampField(DateTime value) => {
   'timestampValue': value.toUtc().toIso8601String(),
 };
@@ -5294,20 +6987,367 @@ Map<String, Object> _mapField(Map<String, String> values) => {
   },
 };
 
+Future<File?> _saveInvoicePdfAs(Invoice invoice, WorkOrder order) async {
+  final safeNumber = invoice.number.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+  final path = await _pickPdfSavePath(
+    '${safeNumber}_invoice.pdf',
+    title: 'Save invoice PDF',
+  );
+  if (path == null) return null;
+  final file = File(path);
+  await file.writeAsBytes(
+    await buildInvoicePdfBytes(invoice, order),
+    flush: true,
+  );
+  return file;
+}
+
+Future<File> _writeInvoicePdfAttachment(
+  Invoice invoice,
+  WorkOrder order,
+) async {
+  final safeNumber = invoice.number.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+  final file = File(
+    '${Directory.systemTemp.path}${Platform.pathSeparator}${safeNumber}_invoice.pdf',
+  );
+  await file.writeAsBytes(
+    await buildInvoicePdfBytes(invoice, order),
+    flush: true,
+  );
+  return file;
+}
+
+Future<List<int>> buildInvoicePdfBytes(Invoice invoice, WorkOrder order) async {
+  final logoBytes = (await rootBundle.load(
+    'assets/logo1.png',
+  )).buffer.asUint8List();
+  final logo = pw.MemoryImage(logoBytes);
+  final document = pw.Document(
+    title: invoice.number,
+    author: 'PHEPHA MV ISDP',
+    subject: 'Invoice for ${invoice.workOrderId}',
+  );
+  final accent = PdfColors.blueGrey800;
+  final muted = PdfColors.grey700;
+  final statusColor = switch (invoice.displayStatus) {
+    'Paid' => PdfColors.green700,
+    'Overdue' => PdfColors.red700,
+    'Void' => PdfColors.grey700,
+    'Issued' => PdfColors.orange700,
+    _ => PdfColors.blue700,
+  };
+
+  document.addPage(
+    pw.MultiPage(
+      pageFormat: PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.fromLTRB(42, 38, 42, 38),
+      footer: (context) => pw.Row(
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        children: [
+          pw.Text(
+            'PHEPHA MV ISDP | Support: $_supportContactNumber',
+            style: pw.TextStyle(fontSize: 8, color: muted),
+          ),
+          pw.Text(
+            'Page ${context.pageNumber} of ${context.pagesCount}',
+            style: pw.TextStyle(fontSize: 8, color: muted),
+          ),
+        ],
+      ),
+      build: (context) => [
+        pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Row(
+              children: [
+                pw.Image(logo, width: 72, height: 52, fit: pw.BoxFit.contain),
+                pw.SizedBox(width: 14),
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text(
+                      'PHEPHA MV ISDP',
+                      style: pw.TextStyle(
+                        fontSize: 20,
+                        fontWeight: pw.FontWeight.bold,
+                        color: accent,
+                      ),
+                    ),
+                    pw.Text(
+                      'Field service operations',
+                      style: pw.TextStyle(color: muted),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.end,
+              children: [
+                pw.Text(
+                  'INVOICE',
+                  style: pw.TextStyle(
+                    fontSize: 28,
+                    fontWeight: pw.FontWeight.bold,
+                    color: accent,
+                  ),
+                ),
+                pw.Text(invoice.number),
+                pw.SizedBox(height: 6),
+                pw.Container(
+                  padding: const pw.EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: pw.BoxDecoration(
+                    color: statusColor,
+                    borderRadius: pw.BorderRadius.circular(3),
+                  ),
+                  child: pw.Text(
+                    invoice.displayStatus.toUpperCase(),
+                    style: pw.TextStyle(
+                      color: PdfColors.white,
+                      fontSize: 9,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        pw.SizedBox(height: 24),
+        pw.Divider(color: PdfColors.grey400),
+        pw.SizedBox(height: 16),
+        pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Expanded(
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  _pdfLabel('BILL TO', accent),
+                  pw.SizedBox(height: 5),
+                  pw.Text(
+                    invoice.customerName,
+                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                  ),
+                  if (invoice.customerAddress.isNotEmpty)
+                    pw.Text(invoice.customerAddress),
+                  if (invoice.customerEmail.isNotEmpty)
+                    pw.Text(invoice.customerEmail),
+                ],
+              ),
+            ),
+            pw.SizedBox(width: 24),
+            pw.Expanded(
+              child: pw.Table(
+                columnWidths: const {
+                  0: pw.FlexColumnWidth(1),
+                  1: pw.FlexColumnWidth(1.4),
+                },
+                children: [
+                  _pdfDetailRow('Invoice date', _dateLabel(invoice.createdAt)),
+                  _pdfDetailRow('Due date', _dateLabel(invoice.dueAt)),
+                  _pdfDetailRow('Work order', invoice.workOrderId),
+                  _pdfDetailRow('Site', order.site),
+                ],
+              ),
+            ),
+          ],
+        ),
+        pw.SizedBox(height: 24),
+        pw.Table(
+          border: pw.TableBorder(
+            horizontalInside: const pw.BorderSide(color: PdfColors.grey300),
+            bottom: const pw.BorderSide(color: PdfColors.grey400),
+          ),
+          columnWidths: const {
+            0: pw.FlexColumnWidth(4.6),
+            1: pw.FlexColumnWidth(1),
+            2: pw.FlexColumnWidth(1.5),
+            3: pw.FlexColumnWidth(1.5),
+          },
+          children: [
+            pw.TableRow(
+              decoration: pw.BoxDecoration(color: accent),
+              children: [
+                _pdfTableCell('DESCRIPTION', header: true),
+                _pdfTableCell('QTY', header: true, right: true),
+                _pdfTableCell('UNIT PRICE', header: true, right: true),
+                _pdfTableCell('AMOUNT', header: true, right: true),
+              ],
+            ),
+            for (final item in invoice.items)
+              pw.TableRow(
+                children: [
+                  _pdfTableCell(item.description),
+                  _pdfTableCell(_invoiceQuantity(item.quantity), right: true),
+                  _pdfTableCell(_billingMoney(item.unitPrice), right: true),
+                  _pdfTableCell(_billingMoney(item.total), right: true),
+                ],
+              ),
+          ],
+        ),
+        pw.SizedBox(height: 18),
+        pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Expanded(
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  _pdfLabel('PAYMENT DETAILS', accent),
+                  pw.SizedBox(height: 5),
+                  pw.Text('Use ${invoice.number} as the payment reference.'),
+                  pw.Text('Payment is due by ${_dateLabel(invoice.dueAt)}.'),
+                  if (invoice.notes.trim().isNotEmpty) ...[
+                    pw.SizedBox(height: 12),
+                    _pdfLabel('NOTES', accent),
+                    pw.SizedBox(height: 5),
+                    pw.Text(invoice.notes.trim()),
+                  ],
+                ],
+              ),
+            ),
+            pw.SizedBox(width: 28),
+            pw.SizedBox(
+              width: 220,
+              child: pw.Column(
+                children: [
+                  _pdfTotalRow('Subtotal', _billingMoney(invoice.subtotal)),
+                  _pdfTotalRow(
+                    'Tax (${(invoice.taxRate * 100).toStringAsFixed(1)}%)',
+                    _billingMoney(invoice.taxAmount),
+                  ),
+                  pw.Divider(color: accent),
+                  _pdfTotalRow(
+                    'TOTAL',
+                    _billingMoney(invoice.total),
+                    strong: true,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        pw.SizedBox(height: 26),
+        pw.Container(
+          width: double.infinity,
+          padding: const pw.EdgeInsets.all(12),
+          decoration: pw.BoxDecoration(
+            color: PdfColors.grey100,
+            border: pw.Border.all(color: PdfColors.grey300),
+          ),
+          child: pw.Text(
+            'Thank you. Please quote the invoice number on all payment correspondence.',
+            textAlign: pw.TextAlign.center,
+            style: pw.TextStyle(fontSize: 10, color: muted),
+          ),
+        ),
+      ],
+    ),
+  );
+  return document.save();
+}
+
+pw.Widget _pdfLabel(String text, PdfColor color) => pw.Text(
+  text,
+  style: pw.TextStyle(
+    color: color,
+    fontSize: 9,
+    fontWeight: pw.FontWeight.bold,
+    letterSpacing: 0.7,
+  ),
+);
+
+pw.TableRow _pdfDetailRow(String label, String value) => pw.TableRow(
+  children: [
+    pw.Padding(
+      padding: const pw.EdgeInsets.only(bottom: 5),
+      child: pw.Text(label, style: const pw.TextStyle(fontSize: 9)),
+    ),
+    pw.Padding(
+      padding: const pw.EdgeInsets.only(bottom: 5),
+      child: pw.Text(
+        value,
+        textAlign: pw.TextAlign.right,
+        style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+      ),
+    ),
+  ],
+);
+
+pw.Widget _pdfTableCell(
+  String value, {
+  bool header = false,
+  bool right = false,
+}) => pw.Padding(
+  padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+  child: pw.Text(
+    value,
+    textAlign: right ? pw.TextAlign.right : pw.TextAlign.left,
+    style: pw.TextStyle(
+      fontSize: header ? 8 : 9,
+      color: header ? PdfColors.white : PdfColors.black,
+      fontWeight: header ? pw.FontWeight.bold : pw.FontWeight.normal,
+    ),
+  ),
+);
+
+pw.Widget _pdfTotalRow(String label, String value, {bool strong = false}) {
+  return pw.Padding(
+    padding: const pw.EdgeInsets.symmetric(vertical: 4),
+    child: pw.Row(
+      children: [
+        pw.Expanded(
+          child: pw.Text(
+            label,
+            style: pw.TextStyle(
+              fontSize: strong ? 12 : 9,
+              fontWeight: strong ? pw.FontWeight.bold : pw.FontWeight.normal,
+            ),
+          ),
+        ),
+        pw.Text(
+          value,
+          style: pw.TextStyle(
+            fontSize: strong ? 12 : 9,
+            fontWeight: strong ? pw.FontWeight.bold : pw.FontWeight.normal,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+String _invoiceQuantity(double value) {
+  return value == value.roundToDouble()
+      ? value.toInt().toString()
+      : value.toStringAsFixed(2);
+}
+
 Future<File?> _saveQrPdfAs(WorkOrder order) async {
-  final path = await _pickQrPdfSavePath('${_safeQrFileId(order)}_site_qr.pdf');
+  final path = await _pickPdfSavePath(
+    '${_safeQrFileId(order)}_site_qr.pdf',
+    title: 'Save site QR PDF',
+  );
   if (path == null) return null;
   final file = File(path);
   await file.writeAsBytes(await _buildQrPdfBytes(order), flush: true);
   return file;
 }
 
-Future<String?> _pickQrPdfSavePath(String suggestedName) async {
+Future<String?> _pickPdfSavePath(
+  String suggestedName, {
+  required String title,
+}) async {
   final script =
       '''
 Add-Type -AssemblyName System.Windows.Forms
 \$dialog = New-Object System.Windows.Forms.SaveFileDialog
-\$dialog.Title = 'Save site QR PDF'
+\$dialog.Title = ${_powerShellLiteral(title)}
 \$dialog.Filter = 'PDF documents (*.pdf)|*.pdf'
 \$dialog.DefaultExt = 'pdf'
 \$dialog.AddExtension = \$true
@@ -5435,7 +7475,7 @@ Future<void> _openOutlookDraftWithAttachment({
 \$mail.Body = ${_powerShellLiteral(body)}
 [void]\$mail.Attachments.Add(${_powerShellLiteral(attachmentPath)})
 if (\$mail.Attachments.Count -lt 1) {
-  throw 'Outlook did not attach the QR PDF.'
+  throw 'Outlook did not attach the PDF.'
 }
 \$mail.Display()
 Write-Output 'ATTACHED'
