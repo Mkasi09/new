@@ -837,7 +837,9 @@ class _NotificationSettingsScreenState
     if (!mounted) return;
     setState(() {
       _status = status;
-      _lastError = status.error?.toString();
+      _lastError = status.error == null
+          ? null
+          : 'Notifications could not be registered. $supportContactMessage';
       _checking = false;
     });
     ScaffoldMessenger.of(context).showSnackBar(
@@ -938,7 +940,7 @@ class _AppSettingsScreen extends StatelessWidget {
             _InfoRow(
               icon: Icons.cloud_done_outlined,
               title: 'Sync',
-              subtitle: 'Firebase cloud sync enabled',
+              subtitle: 'Cloud sync enabled',
             ),
           ],
         ),

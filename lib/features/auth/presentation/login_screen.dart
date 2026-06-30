@@ -120,7 +120,7 @@ class _LoginScreenState extends State<LoginScreen> {
       case 'invalid-credential':
         return 'Email or password is incorrect.';
       default:
-        return error.message ?? 'Sign in failed. Please try again.';
+        return 'Sign in failed. Please try again.';
     }
   }
 

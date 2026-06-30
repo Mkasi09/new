@@ -207,7 +207,7 @@ class _UploadEvidenceScreenState extends State<UploadEvidenceScreen> {
         _photoDataBySlot[slot] = photoData;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Photo uploaded to Firebase Storage.')),
+        const SnackBar(content: Text('Photo uploaded successfully.')),
       );
     } catch (_) {
       if (!mounted) return;

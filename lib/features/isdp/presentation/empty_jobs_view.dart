@@ -44,7 +44,7 @@ class EmptyJobsView extends StatelessWidget {
                   const SizedBox(height: 6),
                   Text(
                     canCreate
-                        ? 'Create the first Firebase job to start the workflow.'
+                        ? 'Create the first job to start the workflow.'
                         : 'Jobs assigned to your team will appear here.',
                     textAlign: TextAlign.center,
                   ),

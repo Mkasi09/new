@@ -21,7 +21,8 @@ service cloud.firestore {
         (request.auth.uid == userId || isAdmin() || isSupervisor());
       allow create: if false;
       allow delete: if false;
-      allow update: if request.auth.uid == userId &&
+      allow update: if (
+        request.auth.uid == userId &&
         request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly([
             'mustChangePassword',
@@ -37,7 +38,12 @@ service cloud.firestore {
           !request.resource.data.diff(resource.data).affectedKeys()
             .hasAny(['mustChangePassword']) ||
           request.resource.data.mustChangePassword == false
-        );
+        )
+      ) || (
+        isAdmin() &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['team'])
+      );
     }
 
     match /work_orders/{orderId} {
@@ -58,6 +64,11 @@ service cloud.firestore {
         allow read, create, update: if signedIn() && request.auth.uid == userId;
         allow delete: if false;
       }
+    }
+
+    match /invoices/{invoiceId} {
+      allow read, create, update: if isAdmin();
+      allow delete: if false;
     }
   }
 }
