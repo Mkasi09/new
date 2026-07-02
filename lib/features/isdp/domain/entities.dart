@@ -45,8 +45,11 @@ class WorkOrder {
     this.reviewed = false,
     this.reviewedAt,
     this.supervisor,
+    this.supervisorId,
     this.assignedTo,
     this.assignedTechnicians = const [],
+    this.assignedTechnicianIds = const [],
+    this.isOpen = true,
     this.createdBy,
     this.lastMessage,
     this.lastMessageAt,
@@ -76,8 +79,11 @@ class WorkOrder {
   final bool reviewed;
   final DateTime? reviewedAt;
   final String? supervisor;
+  final String? supervisorId;
   final String? assignedTo;
   final List<String> assignedTechnicians;
+  final List<String> assignedTechnicianIds;
+  final bool isOpen;
   final String? createdBy;
   final String? lastMessage;
   final DateTime? lastMessageAt;
@@ -107,8 +113,11 @@ class WorkOrder {
     bool? reviewed,
     DateTime? reviewedAt,
     String? supervisor,
+    String? supervisorId,
     String? assignedTo,
     List<String>? assignedTechnicians,
+    List<String>? assignedTechnicianIds,
+    bool? isOpen,
     String? createdBy,
     String? lastMessage,
     DateTime? lastMessageAt,
@@ -138,8 +147,12 @@ class WorkOrder {
       reviewed: reviewed ?? this.reviewed,
       reviewedAt: reviewedAt ?? this.reviewedAt,
       supervisor: supervisor ?? this.supervisor,
+      supervisorId: supervisorId ?? this.supervisorId,
       assignedTo: assignedTo ?? this.assignedTo,
       assignedTechnicians: assignedTechnicians ?? this.assignedTechnicians,
+      assignedTechnicianIds:
+          assignedTechnicianIds ?? this.assignedTechnicianIds,
+      isOpen: isOpen ?? this.isOpen,
       createdBy: createdBy ?? this.createdBy,
       lastMessage: lastMessage ?? this.lastMessage,
       lastMessageAt: lastMessageAt ?? this.lastMessageAt,
@@ -190,8 +203,11 @@ class WorkOrder {
       'reviewed': reviewed,
       'reviewedAt': reviewedAt?.toIso8601String(),
       'supervisor': supervisor,
+      'supervisorId': supervisorId,
       'assignedTo': assignedTo,
       'assignedTechnicians': assignedTechnicians,
+      'assignedTechnicianIds': assignedTechnicianIds,
+      'isOpen': isOpen,
       'createdBy': createdBy,
       'lastMessage': lastMessage,
       'lastMessageAt': lastMessageAt?.toIso8601String(),
@@ -234,6 +250,7 @@ class WorkOrder {
       reviewed: map['reviewed'] as bool? ?? false,
       reviewedAt: _dateTimeFromMapValue(map['reviewedAt']),
       supervisor: displayPersonName(map['supervisor'] as String?),
+      supervisorId: map['supervisorId'] as String?,
       assignedTo: map['assignedTo'] as String?,
       assignedTechnicians:
           (map['assignedTechnicians'] as List<dynamic>?)
@@ -242,6 +259,14 @@ class WorkOrder {
               .where((name) => name.isNotEmpty)
               .toList() ??
           const [],
+      assignedTechnicianIds:
+          (map['assignedTechnicianIds'] as List<dynamic>?)
+              ?.whereType<String>()
+              .toList() ??
+          const [],
+      isOpen:
+          map['isOpen'] as bool? ??
+          (map['status'] as String? ?? 'New') != 'Approved',
       createdBy: map['createdBy'] as String?,
       lastMessage: map['lastMessage'] as String?,
       lastMessageAt: _dateTimeFromMapValue(map['lastMessageAt']),

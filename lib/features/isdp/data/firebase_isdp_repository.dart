@@ -1,14 +1,15 @@
-import 'dart:async';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../../../core/domain/app_role.dart';
 import '../domain/entities.dart';
 import '../domain/isdp_repository.dart';
 import 'isdp_mock_data.dart';
 
 class FirebaseIsdpRepository implements IsdpRepository {
   FirebaseIsdpRepository({
+    required this.role,
+    required this.userId,
     FirebaseFirestore? firestore,
     FirebaseAuth? firebaseAuth,
   }) : _firestore = firestore ?? FirebaseFirestore.instance,
@@ -16,9 +17,37 @@ class FirebaseIsdpRepository implements IsdpRepository {
 
   final FirebaseFirestore _firestore;
   final FirebaseAuth _firebaseAuth;
+  final AppRole role;
+  final String userId;
 
   CollectionReference<Map<String, dynamic>> get _workOrders =>
       _firestore.collection('work_orders');
+
+  late final Query<Map<String, dynamic>> _visibleWorkOrders = switch (role) {
+    AppRole.admin =>
+      _workOrders
+          .where(
+            'createdAt',
+            isGreaterThanOrEqualTo: Timestamp.fromDate(
+              DateTime.now().subtract(const Duration(days: 45)),
+            ),
+          )
+          .orderBy('createdAt', descending: true),
+    AppRole.technician =>
+      _workOrders
+          .where('assignedTechnicianIds', arrayContains: userId)
+          .where('isOpen', isEqualTo: true)
+          .orderBy('createdAt', descending: true),
+    AppRole.supervisor =>
+      _workOrders
+          .where('isOpen', isEqualTo: true)
+          .orderBy('createdAt', descending: true),
+  };
+
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> _visibleSnapshots =
+      _visibleWorkOrders
+          .snapshots(includeMetadataChanges: true)
+          .asBroadcastStream();
 
   String get _uid => _firebaseAuth.currentUser?.uid ?? 'system';
 
@@ -27,19 +56,16 @@ class FirebaseIsdpRepository implements IsdpRepository {
 
   @override
   Stream<List<WorkOrder>> watchWorkOrders() {
-    return _workOrders
-        .orderBy('createdAt', descending: true)
-        .snapshots()
-        .map(
-          (snapshot) => snapshot.docs
-              .map((doc) => WorkOrder.fromMap(doc.id, doc.data()))
-              .toList(),
-        );
+    return _visibleSnapshots.map(
+      (snapshot) => snapshot.docs
+          .map((doc) => WorkOrder.fromMap(doc.id, doc.data()))
+          .toList(),
+    );
   }
 
   @override
   Stream<SyncStatus> watchSyncStatus() {
-    return _workOrders.snapshots(includeMetadataChanges: true).map((snapshot) {
+    return _visibleSnapshots.map((snapshot) {
       if (snapshot.docs.any((doc) => doc.metadata.hasPendingWrites)) {
         return SyncStatus.syncing;
       }
@@ -64,6 +90,7 @@ class FirebaseIsdpRepository implements IsdpRepository {
     final created = order.copyWith(
       status: 'Assigned to Supervisor',
       createdBy: _uid,
+      isOpen: true,
     );
     await doc.set({
       ...created.toMap(),
@@ -79,6 +106,8 @@ class FirebaseIsdpRepository implements IsdpRepository {
     return _workOrders.doc(order.id).update({
       'status': 'Accepted by Supervisor',
       if (order.supervisor != null) 'supervisor': order.supervisor,
+      'supervisorId': _uid,
+      'isOpen': true,
       'updatedAt': FieldValue.serverTimestamp(),
       'history': FieldValue.arrayUnion([
         _historyEntry('accepted by supervisor'),
@@ -92,6 +121,8 @@ class FirebaseIsdpRepository implements IsdpRepository {
       'status': 'Dispatched',
       'assignedTo': order.technicianLabel ?? order.assignedTo ?? _uid,
       'assignedTechnicians': order.assignedTechnicians,
+      'assignedTechnicianIds': order.assignedTechnicianIds,
+      'isOpen': true,
       'updatedAt': FieldValue.serverTimestamp(),
       'history': FieldValue.arrayUnion([_historyEntry('assigned')]),
     });
@@ -218,94 +249,65 @@ class FirebaseIsdpRepository implements IsdpRepository {
       'lastMessageBy': senderName.trim().isEmpty
           ? 'ISDP User'
           : senderName.trim(),
+      'chatMessageCount': FieldValue.increment(1),
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }
 
   @override
   Stream<int> watchUnreadJobMessageCount(String workOrderId) {
-    final uid = _uid;
-    final controller = StreamController<int>();
-    List<JobChatMessage> messages = const [];
-    DateTime? readAt;
-
-    void emit() {
-      if (controller.isClosed) return;
-      controller.add(
-        messages
-            .where(
-              (message) =>
-                  message.senderId != uid &&
-                  (readAt == null || message.createdAt.isAfter(readAt!)),
-            )
-            .length,
-      );
-    }
-
-    final messageSub = watchJobMessages(workOrderId).listen((value) {
-      messages = value;
-      emit();
-    }, onError: controller.addError);
-    final readSub = _workOrders
+    return _firestore
+        .collection('users')
+        .doc(_uid)
+        .collection('chat_unread')
         .doc(workOrderId)
-        .collection('chat_reads')
-        .doc(uid)
         .snapshots()
-        .listen((snapshot) {
-          readAt = _dateTimeFromValue(snapshot.data()?['readAt']);
-          emit();
-        }, onError: controller.addError);
-
-    controller.onCancel = () async {
-      await messageSub.cancel();
-      await readSub.cancel();
-    };
-    return controller.stream;
+        .map((snapshot) => (snapshot.data()?['count'] as num?)?.toInt() ?? 0)
+        .distinct();
   }
 
   @override
   Stream<int> watchUnreadJobMessageTotal(List<String> workOrderIds) {
-    final ids = workOrderIds.toSet().toList();
-    if (ids.isEmpty) return Stream.value(0);
-    final controller = StreamController<int>();
-    final counts = <String, int>{for (final id in ids) id: 0};
-    final subscriptions = <StreamSubscription<int>>[];
-
-    void emit() {
-      if (!controller.isClosed) {
-        controller.add(
-          counts.values.fold<int>(0, (total, value) => total + value),
-        );
-      }
-    }
-
-    for (final id in ids) {
-      subscriptions.add(
-        watchUnreadJobMessageCount(id).listen((value) {
-          counts[id] = value;
-          emit();
-        }, onError: controller.addError),
-      );
-    }
-    controller.onCancel = () async {
-      for (final subscription in subscriptions) {
-        await subscription.cancel();
-      }
-    };
-    return controller.stream;
+    return _firestore
+        .collection('users')
+        .doc(_uid)
+        .collection('chat_unread')
+        .where('count', isGreaterThan: 0)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs.fold<int>(
+            0,
+            (total, doc) =>
+                total + ((doc.data()['count'] as num?)?.toInt() ?? 0),
+          ),
+        )
+        .distinct();
   }
 
   @override
-  Future<void> markJobChatRead(String workOrderId) {
-    return _workOrders.doc(workOrderId).collection('chat_reads').doc(_uid).set({
-      'userId': _uid,
-      'readAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+  Future<void> markJobChatRead(String workOrderId) async {
+    final batch = _firestore.batch();
+    batch.set(
+      _workOrders.doc(workOrderId).collection('chat_reads').doc(_uid),
+      {'userId': _uid, 'readAt': FieldValue.serverTimestamp()},
+      SetOptions(merge: true),
+    );
+    batch.set(
+      _firestore
+          .collection('users')
+          .doc(_uid)
+          .collection('chat_unread')
+          .doc(workOrderId),
+      {'count': 0, 'readAt': FieldValue.serverTimestamp()},
+      SetOptions(merge: true),
+    );
+    await batch.commit();
   }
 
   Future<void> _updateStatus(WorkOrder order, String status, {String? sla}) {
     final update = <String, Object?>{
       'status': status,
+      'isOpen': status != 'Approved',
       'updatedAt': FieldValue.serverTimestamp(),
       'history': FieldValue.arrayUnion([_historyEntry(status.toLowerCase())]),
     };
@@ -316,12 +318,4 @@ class FirebaseIsdpRepository implements IsdpRepository {
   Map<String, Object?> _historyEntry(String action) {
     return {'action': action, 'userId': _uid, 'at': Timestamp.now()};
   }
-}
-
-DateTime? _dateTimeFromValue(Object? value) {
-  if (value == null) return null;
-  if (value is DateTime) return value;
-  if (value is Timestamp) return value.toDate();
-  if (value is String) return DateTime.tryParse(value);
-  return null;
 }

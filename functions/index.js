@@ -126,10 +126,8 @@ exports.notifyWorkOrderUpdate = onDocumentWritten(
     const notification = notificationForWorkOrder(event.params.orderId, before, after);
     if (!notification) return;
 
-    const users = await getFirestore().collection("users").get();
-    const recipients = users.docs.filter((doc) =>
-      shouldNotifyUser(doc.id, doc.data(), notification.audience, after),
-    );
+    const db = getFirestore();
+    const recipients = await usersForAudience(db, notification.audience, after);
     const tokens = tokensForUsers(recipients);
     console.log("notifyWorkOrderUpdate", {
       orderId: event.params.orderId,
@@ -180,17 +178,24 @@ exports.notifyJobChatMessage = onDocumentCreated(
     const text = cleanString(message.message);
     if (!text) return;
 
-    await db.collection("work_orders").doc(event.params.orderId).update({
-      lastMessage: text,
-      lastMessageAt: FieldValue.serverTimestamp(),
-      lastMessageBy: senderName,
-      chatMessageCount: FieldValue.increment(1),
-    });
-
-    const users = await db.collection("users").get();
-    const recipients = users.docs.filter((doc) =>
-      doc.id !== senderId && shouldNotifyUser(doc.id, doc.data(), "field_team", order),
-    );
+    const recipients = (await usersForAudience(db, "field_team", order))
+      .filter((doc) => doc.id !== senderId);
+    if (recipients.length > 0) {
+      const unreadBatch = db.batch();
+      for (const recipient of recipients) {
+        unreadBatch.set(
+          db.collection("users").doc(recipient.id)
+            .collection("chat_unread").doc(event.params.orderId),
+          {
+            orderId: event.params.orderId,
+            count: FieldValue.increment(1),
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+      }
+      await unreadBatch.commit();
+    }
     const tokens = tokensForUsers(recipients);
     console.log("notifyJobChatMessage", {
       orderId: event.params.orderId,
@@ -295,42 +300,36 @@ function notificationForWorkOrder(orderId, before, after) {
   return null;
 }
 
-function shouldNotifyUser(uid, user, audience, order) {
-  const role = cleanString(user.role).toLowerCase();
-  if (audience === "admins") return role === "admin";
+async function usersForAudience(db, audience, order) {
+  if (audience === "admins") {
+    return (await db.collection("users").where("role", "==", "admin").get()).docs;
+  }
   if (audience === "supervisors") {
-    return role === "admin" || role === "supervisor" || matchesPerson(uid, user, order.supervisor);
+    return (await db.collection("users")
+      .where("role", "in", ["admin", "supervisor"])
+      .get()).docs;
   }
-  if (audience === "technicians") {
-    return role === "technician" && matchesAnyTechnician(uid, user, order);
-  }
+
+  const technicianIds = Array.isArray(order.assignedTechnicianIds)
+    ? order.assignedTechnicianIds.map(cleanString).filter(Boolean)
+    : [];
+  const supervisorId = cleanString(order.supervisorId);
+
+  const ids = new Set(technicianIds);
+  if (audience === "field_team" && supervisorId) ids.add(supervisorId);
+  let recipients = ids.size > 0
+    ? await db.getAll(...Array.from(ids, (uid) => db.collection("users").doc(uid)))
+    : [];
+  recipients = recipients.filter((doc) => doc.exists);
+
   if (audience === "field_team") {
-    return role === "admin" ||
-      matchesPerson(uid, user, order.supervisor) ||
-      matchesAnyTechnician(uid, user, order);
+    const admins = await db.collection("users").where("role", "==", "admin").get();
+    recipients.push(...admins.docs);
   }
-  return false;
-}
 
-function matchesAnyTechnician(uid, user, order) {
-  const values = [
-    order.assignedTo,
-    ...(Array.isArray(order.assignedTechnicians) ? order.assignedTechnicians : []),
-  ];
-  return values.some((value) => matchesPerson(uid, user, value));
-}
-
-function matchesPerson(uid, user, value) {
-  const target = cleanString(value).toLowerCase();
-  if (!target) return false;
-  const candidates = [
-    uid,
-    user.uid,
-    user.name,
-    user.email,
-    displayNameFromEmail(user.email),
-  ].map((item) => cleanString(item).toLowerCase()).filter(Boolean);
-  return candidates.includes(target);
+  return Array.from(
+    new Map(recipients.map((doc) => [doc.id, doc])).values(),
+  );
 }
 
 function tokensForUsers(users) {
@@ -507,16 +506,6 @@ function evidenceChanged(before, after) {
     JSON.stringify(after.evidencePhotos || {}) ||
     JSON.stringify(before.evidenceSlots || []) !==
     JSON.stringify(after.evidenceSlots || []);
-}
-
-function displayNameFromEmail(email) {
-  const localPart = cleanString(email).split("@")[0];
-  if (!localPart) return "";
-  return localPart
-    .split(/[._-]+/)
-    .filter(Boolean)
-    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
-    .join(" ");
 }
 
 function cleanString(value) {

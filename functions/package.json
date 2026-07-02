@@ -6,7 +6,7 @@
     "node": "22"
   },
   "scripts": {
-    "deploy": "firebase deploy --only functions,firestore:rules"
+    "deploy": "firebase deploy --only functions,firestore:rules,firestore:indexes"
   },
   "dependencies": {
     "firebase-admin": "^13.4.0",

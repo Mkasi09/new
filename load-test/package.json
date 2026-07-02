@@ -1,0 +1,19 @@
+{
+  "name": "isdp-load-test",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "seed": "node scripts/seed.mjs",
+    "load": "node scripts/run.mjs",
+    "cleanup": "node scripts/cleanup.mjs",
+    "check": "node --check scripts/config.mjs && node --check scripts/metrics.mjs && node --check scripts/seed.mjs && node --check scripts/run.mjs && node --check scripts/cleanup.mjs"
+  },
+  "dependencies": {
+    "dotenv": "^16.5.0",
+    "firebase": "^11.10.0",
+    "firebase-admin": "^13.4.0"
+  }
+}

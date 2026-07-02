@@ -38,6 +38,14 @@ service cloud.firestore {
             .hasAny(['mustChangePassword']) ||
           request.resource.data.mustChangePassword == false
         );
+
+      match /chat_unread/{orderId} {
+        allow read: if signedIn() && request.auth.uid == userId;
+        allow create, update: if signedIn() &&
+          request.auth.uid == userId &&
+          request.resource.data.count == 0;
+        allow delete: if false;
+      }
     }
 
     match /work_orders/{orderId} {
