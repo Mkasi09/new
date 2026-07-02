@@ -222,9 +222,10 @@ class _AdminHome extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final open = workOrders.where((order) => order.status != 'Approved').length;
-    final done = workOrders
-        .where((order) => order.status == 'Submitted')
+    final inProgress = workOrders
+        .where(
+          (order) => order.status != 'Submitted' && order.status != 'Approved',
+        )
         .length;
     final approvalQueue = workOrders
         .where((order) => order.status == 'Submitted')
@@ -240,14 +241,19 @@ class _AdminHome extends StatelessWidget {
               'Create jobs, route them to the supervisor, and approve submitted jobs.',
         ),
         const SizedBox(height: 14),
-        Row(
-          children: [
-            Expanded(
-              child: _MetricTile(value: '$open', label: 'Open jobs'),
+        _MetricStrip(
+          metrics: [
+            _MetricData(
+              icon: Icons.timelapse_outlined,
+              value: '$inProgress',
+              label: 'In progress',
+              color: AppTheme.primary,
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: _MetricTile(value: '$done', label: 'Submitted'),
+            _MetricData(
+              icon: Icons.rate_review_outlined,
+              value: '${approvalQueue.length}',
+              label: 'Awaiting review',
+              color: AppTheme.warning,
             ),
           ],
         ),
@@ -1015,25 +1021,89 @@ class _TechnicianJobDetails extends StatelessWidget {
   }
 }
 
-class _MetricTile extends StatelessWidget {
-  const _MetricTile({required this.value, required this.label});
+class _MetricStrip extends StatelessWidget {
+  const _MetricStrip({required this.metrics});
 
+  final List<_MetricData> metrics;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 360 ? metrics.length : 1;
+        final spacing = 10.0;
+        final tileWidth =
+            (constraints.maxWidth - (spacing * (columns - 1))) / columns;
+
+        return Wrap(
+          spacing: spacing,
+          runSpacing: spacing,
+          children: [
+            for (final metric in metrics)
+              SizedBox(
+                width: tileWidth,
+                height: 104,
+                child: _MetricTile(metric: metric),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _MetricData {
+  const _MetricData({
+    required this.icon,
+    required this.value,
+    required this.label,
+    required this.color,
+  });
+
+  final IconData icon;
   final String value;
   final String label;
+  final Color color;
+}
+
+class _MetricTile extends StatelessWidget {
+  const _MetricTile({required this.metric});
+
+  final _MetricData metric;
 
   @override
   Widget build(BuildContext context) {
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        padding: const EdgeInsets.all(14),
+        child: Row(
           children: [
-            Text(
-              value,
-              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900),
+            IconPill(icon: metric.icon, color: metric.color),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    metric.value,
+                    style: const TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  Text(
+                    metric.label,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppTheme.muted,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
             ),
-            Text(label, style: const TextStyle(color: AppTheme.muted)),
           ],
         ),
       ),
@@ -1123,74 +1193,100 @@ class _ActionGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final width = MediaQuery.sizeOf(context).width;
-    final itemWidth = width >= 720 ? (width - 64) / actions.length : 158.0;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 620 ? actions.length : 2;
+        final spacing = 8.0;
+        final itemWidth =
+            (constraints.maxWidth - (spacing * (columns - 1))) / columns;
 
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: actions
-          .map(
-            (action) => SizedBox(
-              width: itemWidth.clamp(118.0, 220.0),
-              height: 78,
-              child: Card(
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(8),
-                  onTap: action.onTap,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 10,
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(action.icon, color: AppTheme.primary),
-                        const SizedBox(height: 5),
-                        Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            Text(
-                              action.label,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                            if (action.badgeStream != null)
-                              StreamBuilder<int>(
-                                stream: action.badgeStream,
-                                initialData: action.badgeCount,
-                                builder: (context, snapshot) {
-                                  final count = snapshot.data ?? 0;
-                                  if (count == 0) {
-                                    return const SizedBox.shrink();
-                                  }
-                                  return Positioned(
-                                    right: -18,
-                                    top: -12,
-                                    child: _CountBadge(count: count),
-                                  );
-                                },
-                              )
-                            else if (action.badgeCount > 0)
-                              Positioned(
-                                right: -18,
-                                top: -12,
-                                child: _CountBadge(count: action.badgeCount),
+        return Wrap(
+          spacing: spacing,
+          runSpacing: spacing,
+          children: actions
+              .map(
+                (action) => SizedBox(
+                  width: itemWidth,
+                  height: 78,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Positioned.fill(
+                        child: Card(
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(8),
+                            onTap: action.onTap,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 10,
                               ),
-                          ],
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(action.icon, color: AppTheme.primary),
+                                  const SizedBox(height: 5),
+                                  Text(
+                                    action.label,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                         ),
-                      ],
-                    ),
+                      ),
+                      _ActionBadge(action: action),
+                    ],
                   ),
                 ),
-              ),
-            ),
-          )
-          .toList(),
+              )
+              .toList(),
+        );
+      },
     );
+  }
+}
+
+class _ActionBadge extends StatelessWidget {
+  const _ActionBadge({required this.action});
+
+  final _RoleAction action;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      right: 2,
+      top: 2,
+      child: action.badgeStream == null
+          ? _ActionBadgeValue(count: action.badgeCount)
+          : StreamBuilder<int>(
+              stream: action.badgeStream,
+              builder: (context, snapshot) {
+                return _ActionBadgeValue(
+                  count: snapshot.data ?? action.badgeCount,
+                );
+              },
+            ),
+    );
+  }
+}
+
+class _ActionBadgeValue extends StatelessWidget {
+  const _ActionBadgeValue({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    if (count <= 0) return const SizedBox.shrink();
+    return _CountBadge(count: count);
   }
 }
 
@@ -1220,7 +1316,6 @@ class _ChatButtonLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     return StreamBuilder<int>(
       stream: stream,
-      initialData: 0,
       builder: (context, snapshot) {
         final count = snapshot.data ?? 0;
         if (count == 0) return Text(text);
@@ -1229,10 +1324,28 @@ class _ChatButtonLabel extends StatelessWidget {
           children: [
             Text(text),
             const SizedBox(width: 8),
-            UnreadCountBadge(count: count),
+            _InlineUnreadChip(count: count),
           ],
         );
       },
+    );
+  }
+}
+
+class _InlineUnreadChip extends StatelessWidget {
+  const _InlineUnreadChip({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      count > 99 ? '99+ unread' : '$count unread',
+      style: const TextStyle(
+        color: AppTheme.danger,
+        fontSize: 12,
+        fontWeight: FontWeight.w900,
+      ),
     );
   }
 }

@@ -455,6 +455,7 @@ class _IsdpShellState extends State<IsdpShell> {
       _WorkflowView.analytics => AnalyticsView(
         role: _role,
         workOrders: visibleOrders,
+        onOpenJob: _openJobFromAnalytics,
         onClose: _closeWorkflow,
       ),
       _WorkflowView.reviewQueue => ReviewQueueScreen(
@@ -594,6 +595,18 @@ class _IsdpShellState extends State<IsdpShell> {
       _selectedOrderId = order.id;
       _tab = 0;
     });
+  }
+
+  void _openJobFromAnalytics(WorkOrder order) {
+    if (_role == AppRole.admin) {
+      _openAdminJob(order);
+      return;
+    }
+    if (_role == AppRole.supervisor) {
+      _openSupervisorJobScreen(order);
+      return;
+    }
+    _openOrder(order);
   }
 
   void _openAdminJob(WorkOrder order) {

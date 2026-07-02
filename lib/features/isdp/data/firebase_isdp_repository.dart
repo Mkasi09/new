@@ -256,18 +256,65 @@ class FirebaseIsdpRepository implements IsdpRepository {
 
   @override
   Stream<int> watchUnreadJobMessageCount(String workOrderId) {
+<<<<<<< HEAD
     return _firestore
         .collection('users')
         .doc(_uid)
         .collection('chat_unread')
+=======
+    final uid = _uid;
+    final controller = StreamController<int>();
+    List<JobChatMessage> messages = const [];
+    DateTime? readAt;
+    var hasMessages = false;
+    var hasReadState = false;
+    int? lastCount;
+
+    void emit() {
+      if (controller.isClosed) return;
+      if (!hasMessages || !hasReadState) return;
+      final count = messages
+          .where(
+            (message) =>
+                message.senderId != uid &&
+                (readAt == null || message.createdAt.isAfter(readAt!)),
+          )
+          .length;
+      if (count == lastCount) return;
+      lastCount = count;
+      controller.add(count);
+    }
+
+    final messageSub = watchJobMessages(workOrderId).listen((value) {
+      messages = value;
+      hasMessages = true;
+      emit();
+    }, onError: controller.addError);
+    final readSub = _workOrders
+>>>>>>> fe0d8aa8942866d04708b81b87a8ba88df48210d
         .doc(workOrderId)
         .snapshots()
+<<<<<<< HEAD
         .map((snapshot) => (snapshot.data()?['count'] as num?)?.toInt() ?? 0)
         .distinct();
+=======
+        .listen((snapshot) {
+          readAt = _dateTimeFromValue(snapshot.data()?['readAt']);
+          hasReadState = true;
+          emit();
+        }, onError: controller.addError);
+
+    controller.onCancel = () async {
+      await messageSub.cancel();
+      await readSub.cancel();
+    };
+    return controller.stream;
+>>>>>>> fe0d8aa8942866d04708b81b87a8ba88df48210d
   }
 
   @override
   Stream<int> watchUnreadJobMessageTotal(List<String> workOrderIds) {
+<<<<<<< HEAD
     return _firestore
         .collection('users')
         .doc(_uid)
@@ -282,6 +329,42 @@ class FirebaseIsdpRepository implements IsdpRepository {
           ),
         )
         .distinct();
+=======
+    final ids = workOrderIds.toSet().toList();
+    if (ids.isEmpty) return Stream.value(0);
+    final controller = StreamController<int>();
+    final counts = <String, int>{for (final id in ids) id: 0};
+    final readyIds = <String>{};
+    final subscriptions = <StreamSubscription<int>>[];
+    int? lastTotal;
+
+    void emit() {
+      if (controller.isClosed || readyIds.length != ids.length) return;
+      final total = counts.values.fold<int>(
+        0,
+        (currentTotal, value) => currentTotal + value,
+      );
+      if (total == lastTotal) return;
+      lastTotal = total;
+      controller.add(total);
+    }
+
+    for (final id in ids) {
+      subscriptions.add(
+        watchUnreadJobMessageCount(id).listen((value) {
+          counts[id] = value;
+          readyIds.add(id);
+          emit();
+        }, onError: controller.addError),
+      );
+    }
+    controller.onCancel = () async {
+      for (final subscription in subscriptions) {
+        await subscription.cancel();
+      }
+    };
+    return controller.stream;
+>>>>>>> fe0d8aa8942866d04708b81b87a8ba88df48210d
   }
 
   @override

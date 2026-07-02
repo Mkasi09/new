@@ -9,8 +9,34 @@ import 'package:isdp_admin_desktop/main.dart';
 
 class FakeAdminRepository implements AdminRepository {
   final deletedIds = <String>[];
+  final savedInvoices = <Invoice>[];
+  final technicians = <AdminUserProfile>[
+    const AdminUserProfile(
+      uid: 'tech-1',
+      email: 'sibusiso@commit.co.sz',
+      name: 'Sibusiso M.',
+      role: 'technician',
+      team: 'Field Team A',
+    ),
+    const AdminUserProfile(
+      uid: 'tech-2',
+      email: 'thabo.tech@commit.co.sz',
+      name: 'Thabo M.',
+      role: 'technician',
+      team: 'Field Team B',
+    ),
+    const AdminUserProfile(
+      uid: 'supervisor-1',
+      email: 'mandla@commit.co.sz',
+      name: 'Mandla Dlamini',
+      role: 'supervisor',
+      team: 'North Region',
+    ),
+  ];
   WorkOrder? updatedOrder;
   String? updatedAction;
+  AdminUserProfile? updatedTechnician;
+  String? updatedTeam;
 
   @override
   Future<AuthSession> signIn({
@@ -78,30 +104,37 @@ class FakeAdminRepository implements AdminRepository {
   }
 
   @override
+  Future<List<Invoice>> fetchInvoices(AuthSession session) async {
+    return List.of(savedInvoices);
+  }
+
+  @override
+  Future<void> saveInvoice(AuthSession session, Invoice invoice) async {
+    final index = savedInvoices.indexWhere((item) => item.id == invoice.id);
+    if (index == -1) {
+      savedInvoices.add(invoice);
+    } else {
+      savedInvoices[index] = invoice;
+    }
+  }
+
+  @override
   Future<List<AdminUserProfile>> fetchTechnicians(AuthSession session) async {
-    return const [
-      AdminUserProfile(
-        uid: 'tech-1',
-        email: 'sibusiso@commit.co.sz',
-        name: 'Sibusiso M.',
-        role: 'technician',
-        team: 'Field Team A',
-      ),
-      AdminUserProfile(
-        uid: 'tech-2',
-        email: 'thabo.tech@commit.co.sz',
-        name: 'Thabo M.',
-        role: 'technician',
-        team: 'Field Team B',
-      ),
-      AdminUserProfile(
-        uid: 'supervisor-1',
-        email: 'mandla@commit.co.sz',
-        name: 'Mandla Dlamini',
-        role: 'supervisor',
-        team: 'North Region',
-      ),
-    ].where((user) => user.role == 'technician').toList();
+    return technicians.where((user) => user.role == 'technician').toList();
+  }
+
+  @override
+  Future<void> updateTechnicianTeam(
+    AuthSession session,
+    AdminUserProfile technician, {
+    required String team,
+  }) async {
+    updatedTechnician = technician;
+    updatedTeam = team;
+    final index = technicians.indexWhere((user) => user.uid == technician.uid);
+    if (index != -1) {
+      technicians[index] = technicians[index].copyWith(team: team);
+    }
   }
 
   @override
@@ -342,6 +375,39 @@ void main() {
     expect(technicians.map((user) => user.name), ['Sibusiso M.']);
   });
 
+  test('admin repository assigns technician to a team in Firestore', () async {
+    Map<String, dynamic>? payload;
+    Uri? requestedUri;
+    final repository = RestAdminRepository(
+      client: MockClient((request) async {
+        requestedUri = request.url;
+        payload = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response('{}', 200);
+      }),
+    );
+
+    await repository.updateTechnicianTeam(
+      const AuthSession(
+        idToken: 'token',
+        email: 'admin@test.com',
+        uid: 'admin',
+      ),
+      const AdminUserProfile(
+        uid: 'tech-1',
+        email: 'sibusiso@commit.co.sz',
+        name: 'Sibusiso M.',
+        role: 'technician',
+        team: 'Field Team A',
+      ),
+      team: 'Rapid Response',
+    );
+
+    final fields = payload!['fields'] as Map<String, dynamic>;
+    expect(fields['team']['stringValue'], 'Rapid Response');
+    expect(requestedUri!.path, contains('/documents/users/tech-1'));
+    expect(requestedUri!.queryParametersAll['updateMask.fieldPaths'], ['team']);
+  });
+
   test('admin repository writes assigned technicians to Firestore', () async {
     Map<String, dynamic>? payload;
     Uri? requestedUri;
@@ -406,6 +472,62 @@ void main() {
     expect(find.byIcon(Icons.dashboard_outlined), findsWidgets);
   });
 
+  testWidgets('admin completes the invoice lifecycle', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final repository = FakeAdminRepository();
+    await tester.pumpWidget(IsdpAdminApp(repository: repository));
+    await tester.enterText(find.byType(TextFormField).first, 'admin@test.com');
+    await tester.enterText(find.byType(TextFormField).last, 'password');
+    await tester.tap(find.text('Sign in'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Billing & Invoices'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Billing & Invoices'), findsNWidgets(2));
+    expect(find.text('Invoice Process'), findsOneWidget);
+    expect(find.text('Ready for Invoicing'), findsOneWidget);
+    expect(find.text('Editable rates'), findsOneWidget);
+    await tester.tap(find.text('Create draft'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Invoice draft - JOB-CMT-ESW-101'), findsOneWidget);
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Customer email'),
+      'accounts@example.com',
+    );
+    await tester.tap(find.text('Save draft'));
+    await tester.pumpAndSettle();
+
+    expect(repository.savedInvoices, hasLength(1));
+    expect(repository.savedInvoices.single.status, InvoiceStatus.draft);
+
+    await tester.drag(find.byType(ListView).first, const Offset(0, -650));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView).first, const Offset(0, -650));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Invoice actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Issue invoice'));
+    await tester.pumpAndSettle();
+
+    expect(repository.savedInvoices.single.status, InvoiceStatus.issued);
+
+    await tester.tap(find.byTooltip('Invoice actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Mark as paid'));
+    await tester.pumpAndSettle();
+
+    expect(repository.savedInvoices.single.status, InvoiceStatus.paid);
+    expect(repository.savedInvoices.single.paidAt, isNotNull);
+  });
+
   testWidgets('dashboard cards and job rows provide easy navigation', (
     WidgetTester tester,
   ) async {
@@ -434,7 +556,7 @@ void main() {
 
     await tester.tap(find.text('JOB-CMT-ESW-100 - Mbabane Central'));
     await tester.pumpAndSettle();
-    expect(find.text('Back to jobs'), findsOneWidget);
+    expect(find.text('Back to Work orders'), findsOneWidget);
     expect(find.text('Worked 1h 35m'), findsOneWidget);
     await tester.scrollUntilVisible(
       find.text('Job Actions'),
@@ -457,12 +579,7 @@ void main() {
       findsNWidgets(2),
     );
 
-    await tester.scrollUntilVisible(
-      find.text('Back to jobs'),
-      -300,
-      scrollable: find.byType(Scrollable).last,
-    );
-    await tester.tap(find.text('Back to jobs'));
+    await tester.tap(find.text('Back to Work orders'));
     await tester.pumpAndSettle();
     expect(find.text('Search jobs'), findsOneWidget);
   });
@@ -511,6 +628,41 @@ void main() {
 
     await tester.tap(find.text('Field teams'));
     await tester.pumpAndSettle();
+
+    expect(find.text('Sibusiso M.'), findsWidgets);
+    expect(find.text('Thabo M.'), findsWidgets);
+    expect(find.text('Lindiwe S.'), findsNothing);
+
+    await tester.tap(find.byTooltip('View profile').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Technician Profile'), findsOneWidget);
+    expect(find.text('tech-1'), findsOneWidget);
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Assign to team').first);
+    await tester.pumpAndSettle();
+    expect(
+      find.widgetWithText(DropdownButtonFormField<String>, 'Team'),
+      findsOneWidget,
+    );
+    await tester.tap(
+      find.widgetWithText(DropdownButtonFormField<String>, 'Team'),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('New team').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'New team name'),
+      'Rapid Response',
+    );
+    await tester.tap(find.text('Save team'));
+    await tester.pumpAndSettle();
+
+    expect(repository.updatedTechnician?.uid, 'tech-1');
+    expect(repository.updatedTeam, 'Rapid Response');
+    expect(find.textContaining('Rapid Response'), findsWidgets);
+
     await tester.tap(find.widgetWithText(FilledButton, 'Assign').first);
     await tester.pumpAndSettle();
 

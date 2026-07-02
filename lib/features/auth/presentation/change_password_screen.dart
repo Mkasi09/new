@@ -45,7 +45,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
       setState(() {
         final message = error.code == 'requires-recent-login'
             ? 'Your session expired. Sign in again with the temporary password.'
-            : error.message ?? 'Could not change the password.';
+            : 'Could not change the password.';
         _error = withSupportContact(message);
       });
     } catch (_) {

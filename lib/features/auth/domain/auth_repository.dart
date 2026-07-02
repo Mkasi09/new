@@ -33,6 +33,11 @@ abstract class AuthRepository {
 
   Future<void> changePassword(String newPassword);
 
+  Future<void> changePasswordWithCurrentPassword({
+    required String currentPassword,
+    required String newPassword,
+  });
+
   Future<void> createUser({
     required String name,
     required String email,

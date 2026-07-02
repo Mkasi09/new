@@ -274,7 +274,7 @@ void main() {
     await tester.tap(find.text('Thabo M.'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Jobs'), findsOneWidget);
+    expect(find.text('Jobs Needing Attention'), findsOneWidget);
     expect(find.text('Analytics Job'), findsOneWidget);
   });
 

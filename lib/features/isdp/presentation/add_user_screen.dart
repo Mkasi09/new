@@ -62,9 +62,14 @@ class _AddUserScreenState extends State<AddUserScreen> {
       await _showCreatedDialog();
       if (mounted) widget.onClose();
     } on FirebaseFunctionsException catch (error) {
-      _showError(
-        withSupportContact(error.message ?? 'Could not create the user.'),
-      );
+      final message = switch (error.code) {
+        'already-exists' => 'A user with this email already exists.',
+        'permission-denied' => 'Only administrators can create users.',
+        'unauthenticated' => 'Sign in before creating users.',
+        'invalid-argument' => 'Check the user details and try again.',
+        _ => 'Could not create the user.',
+      };
+      _showError(withSupportContact(message));
     } catch (_) {
       _showError(withSupportContact('Could not create the user. Try again.'));
     } finally {

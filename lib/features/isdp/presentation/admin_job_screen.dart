@@ -30,84 +30,42 @@ class AdminJobScreen extends StatelessWidget {
 
     return AppScrollView(
       children: [
-        Row(
-          children: [
-            IconButton(
-              tooltip: 'Back',
-              onPressed: onClose,
-              icon: const Icon(Icons.arrow_back),
-            ),
-            const SizedBox(width: 4),
-            const Expanded(child: SectionTitle('Job Details')),
-            StatusChip(
-              label: order.status,
-              color: workOrderStatusColor(order.status),
-            ),
-            const SizedBox(width: 4),
-            PopupMenuButton<_AdminJobOption>(
-              tooltip: 'Options',
-              onSelected: (option) {
-                switch (option) {
-                  case _AdminJobOption.delete:
-                    onDelete();
-                }
-              },
-              itemBuilder: (context) => const [
-                PopupMenuItem(
-                  value: _AdminJobOption.delete,
-                  child: Row(
-                    children: [
-                      Icon(Icons.delete_outline, color: AppTheme.danger),
-                      SizedBox(width: 10),
-                      Text('Delete job'),
-                    ],
-                  ),
+        JobDetailHeader(
+          title: 'Job Details',
+          order: order,
+          onBack: onClose,
+          trailing: PopupMenuButton<_AdminJobOption>(
+            tooltip: 'Options',
+            onSelected: (option) {
+              switch (option) {
+                case _AdminJobOption.delete:
+                  onDelete();
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: _AdminJobOption.delete,
+                child: Row(
+                  children: [
+                    Icon(Icons.delete_outline, color: AppTheme.danger),
+                    SizedBox(width: 10),
+                    Text('Delete job'),
+                  ],
                 ),
-              ],
-            ),
-          ],
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 12),
         JobOverviewPanel(order: order),
         const SizedBox(height: 14),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: onOpenChat,
-            icon: const Icon(Icons.forum_outlined),
-            label: _UnreadChatLabel(stream: unreadChatStream),
-          ),
+        _AdminActionPanel(
+          onOpenChat: onOpenChat,
+          unreadChatStream: unreadChatStream,
+          onSendQr: onSendQr,
         ),
         const SizedBox(height: 14),
         WorkDurationPanel(order: order),
-        const SizedBox(height: 14),
-        const SectionTitle('QR Code'),
-        const SizedBox(height: 10),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Site QR PDF',
-                  style: TextStyle(fontWeight: FontWeight.w900),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Generate an external PDF with a scannable QR code for this job.',
-                  style: TextStyle(color: AppTheme.muted),
-                ),
-                const SizedBox(height: 12),
-                FilledButton.icon(
-                  onPressed: onSendQr,
-                  icon: const Icon(Icons.picture_as_pdf_outlined),
-                  label: const Text('Generate QR PDF'),
-                ),
-              ],
-            ),
-          ),
-        ),
         const SizedBox(height: 14),
         const SectionTitle('Evidence'),
         const SizedBox(height: 10),
@@ -130,6 +88,57 @@ class AdminJobScreen extends StatelessWidget {
 
 enum _AdminJobOption { delete }
 
+class _AdminActionPanel extends StatelessWidget {
+  const _AdminActionPanel({
+    required this.onOpenChat,
+    required this.unreadChatStream,
+    required this.onSendQr,
+  });
+
+  final VoidCallback onOpenChat;
+  final Stream<int> unreadChatStream;
+  final VoidCallback onSendQr;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 560;
+            final chatButton = OutlinedButton.icon(
+              onPressed: onOpenChat,
+              icon: const Icon(Icons.forum_outlined),
+              label: _UnreadChatLabel(stream: unreadChatStream),
+            );
+            final qrButton = FilledButton.icon(
+              onPressed: onSendQr,
+              icon: const Icon(Icons.picture_as_pdf_outlined),
+              label: const Text('Generate QR PDF'),
+            );
+
+            if (compact) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [chatButton, const SizedBox(height: 10), qrButton],
+              );
+            }
+
+            return Row(
+              children: [
+                Expanded(child: chatButton),
+                const SizedBox(width: 10),
+                Expanded(child: qrButton),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
 class _UnreadChatLabel extends StatelessWidget {
   const _UnreadChatLabel({required this.stream});
 
@@ -139,7 +148,6 @@ class _UnreadChatLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     return StreamBuilder<int>(
       stream: stream,
-      initialData: 0,
       builder: (context, snapshot) {
         final count = snapshot.data ?? 0;
         if (count == 0) return const Text('Job Chat');
@@ -148,7 +156,14 @@ class _UnreadChatLabel extends StatelessWidget {
           children: [
             const Text('Job Chat'),
             const SizedBox(width: 8),
-            UnreadCountBadge(count: count),
+            Text(
+              count > 99 ? '99+ unread' : '$count unread',
+              style: const TextStyle(
+                color: AppTheme.danger,
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
           ],
         );
       },

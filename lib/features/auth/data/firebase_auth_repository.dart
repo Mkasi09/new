@@ -98,6 +98,25 @@ class FirebaseAuthRepository implements AuthRepository {
   }
 
   @override
+  Future<void> changePasswordWithCurrentPassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final user = _firebaseAuth.currentUser;
+    final email = user?.email;
+    if (user == null || email == null || email.isEmpty) {
+      throw StateError('No authenticated user is available.');
+    }
+
+    final credential = EmailAuthProvider.credential(
+      email: email,
+      password: currentPassword,
+    );
+    await user.reauthenticateWithCredential(credential);
+    await changePassword(newPassword);
+  }
+
+  @override
   Future<void> createUser({
     required String name,
     required String email,

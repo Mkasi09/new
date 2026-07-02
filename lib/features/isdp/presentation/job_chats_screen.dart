@@ -102,10 +102,7 @@ class JobChatsScreen extends StatelessWidget {
                         child: OutlinedButton.icon(
                           onPressed: () => onOpenChat(order),
                           icon: const Icon(Icons.chat_bubble_outline),
-                          label: _UnreadOpenChatLabel(
-                            repository: repository,
-                            order: order,
-                          ),
+                          label: const Text('Open Chat'),
                         ),
                       ),
                     ],
@@ -137,78 +134,137 @@ String _chatDetail(WorkOrder order) {
   return '${order.id} - ${order.scope}';
 }
 
-class _UnreadTotalBadge extends StatelessWidget {
+class _UnreadTotalBadge extends StatefulWidget {
   const _UnreadTotalBadge({required this.repository, required this.orders});
 
   final IsdpRepository repository;
   final List<WorkOrder> orders;
 
   @override
+  State<_UnreadTotalBadge> createState() => _UnreadTotalBadgeState();
+}
+
+class _UnreadTotalBadgeState extends State<_UnreadTotalBadge> {
+  late Stream<int> _stream;
+  late List<String> _ids;
+
+  @override
+  void initState() {
+    super.initState();
+    _ids = _orderIds(widget.orders);
+    _stream = widget.repository.watchUnreadJobMessageTotal(_ids);
+  }
+
+  @override
+  void didUpdateWidget(covariant _UnreadTotalBadge oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final ids = _orderIds(widget.orders);
+    if (_sameIds(ids, _ids)) return;
+    _ids = ids;
+    _stream = widget.repository.watchUnreadJobMessageTotal(_ids);
+  }
+
+  @override
   Widget build(BuildContext context) {
     return StreamBuilder<int>(
-      stream: repository.watchUnreadJobMessageTotal(
-        orders.map((order) => order.id).toList(),
-      ),
-      initialData: 0,
+      stream: _stream,
       builder: (context, snapshot) {
         final count = snapshot.data ?? 0;
         if (count == 0) return const SizedBox.shrink();
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Unread'),
-            const SizedBox(width: 6),
-            UnreadCountBadge(count: count),
-          ],
-        );
+        return _UnreadMessageChip(count: count, compact: false);
       },
     );
   }
 }
 
-class _UnreadJobBadge extends StatelessWidget {
+class _UnreadJobBadge extends StatefulWidget {
   const _UnreadJobBadge({required this.repository, required this.order});
 
   final IsdpRepository repository;
   final WorkOrder order;
 
   @override
+  State<_UnreadJobBadge> createState() => _UnreadJobBadgeState();
+}
+
+class _UnreadJobBadgeState extends State<_UnreadJobBadge> {
+  late Stream<int> _stream;
+
+  @override
+  void initState() {
+    super.initState();
+    _stream = widget.repository.watchUnreadJobMessageCount(widget.order.id);
+  }
+
+  @override
+  void didUpdateWidget(covariant _UnreadJobBadge oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.order.id == widget.order.id) return;
+    _stream = widget.repository.watchUnreadJobMessageCount(widget.order.id);
+  }
+
+  @override
   Widget build(BuildContext context) {
     return StreamBuilder<int>(
-      stream: repository.watchUnreadJobMessageCount(order.id),
-      initialData: 0,
+      stream: _stream,
       builder: (context, snapshot) {
         final count = snapshot.data ?? 0;
         if (count == 0) return const SizedBox.shrink();
-        return UnreadCountBadge(count: count);
+        return _UnreadMessageChip(count: count);
       },
     );
   }
 }
 
-class _UnreadOpenChatLabel extends StatelessWidget {
-  const _UnreadOpenChatLabel({required this.repository, required this.order});
+List<String> _orderIds(List<WorkOrder> orders) =>
+    orders.map((order) => order.id).toList();
 
-  final IsdpRepository repository;
-  final WorkOrder order;
+bool _sameIds(List<String> a, List<String> b) {
+  if (a.length != b.length) return false;
+  for (var index = 0; index < a.length; index++) {
+    if (a[index] != b[index]) return false;
+  }
+  return true;
+}
+
+class _UnreadMessageChip extends StatelessWidget {
+  const _UnreadMessageChip({required this.count, this.compact = true});
+
+  final int count;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<int>(
-      stream: repository.watchUnreadJobMessageCount(order.id),
-      initialData: 0,
-      builder: (context, snapshot) {
-        final count = snapshot.data ?? 0;
-        if (count == 0) return const Text('Open Chat');
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Open Chat'),
-            const SizedBox(width: 8),
-            UnreadCountBadge(count: count),
-          ],
-        );
-      },
+    final label = count > 99 ? '99+' : '$count';
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 8 : 10,
+        vertical: compact ? 5 : 6,
+      ),
+      decoration: BoxDecoration(
+        color: AppTheme.danger.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.danger.withValues(alpha: 0.28)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.mark_chat_unread_outlined,
+            size: compact ? 14 : 16,
+            color: AppTheme.danger,
+          ),
+          const SizedBox(width: 5),
+          Text(
+            compact ? label : '$label unread',
+            style: TextStyle(
+              color: AppTheme.danger,
+              fontSize: compact ? 11 : 12,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

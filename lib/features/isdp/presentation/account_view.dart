@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:cloud_functions/cloud_functions.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../../../core/domain/app_role.dart';
@@ -31,10 +31,52 @@ class AccountView extends StatelessWidget {
 
     return AppScrollView(
       children: [
-        _BrandAccountHeader(name: name, role: role, team: team),
-        const SizedBox(height: 12),
+        _AccountHeader(name: name, email: email, role: role, team: team),
+        const SizedBox(height: 14),
+        _SettingsGrid(
+          items: [
+            _SettingsItem(
+              icon: Icons.lock_outline,
+              title: 'Security',
+              subtitle: 'Password and account access',
+              color: AppTheme.primary,
+              onTap: () => _open(
+                context,
+                _SecuritySettingsScreen(
+                  email: email,
+                  authRepository: authRepository,
+                ),
+              ),
+            ),
+            _SettingsItem(
+              icon: Icons.notifications_outlined,
+              title: 'Notifications',
+              subtitle: 'Phone alerts and permissions',
+              color: AppTheme.warning,
+              onTap: () => _open(
+                context,
+                _NotificationSettingsScreen(userId: userProfile?.uid),
+              ),
+            ),
+            _SettingsItem(
+              icon: Icons.support_agent_outlined,
+              title: 'Support',
+              subtitle: supportContactNumber,
+              color: AppTheme.secondary,
+              onTap: () => _open(context, const _SupportScreen()),
+            ),
+            _SettingsItem(
+              icon: Icons.tune_outlined,
+              title: 'App Settings',
+              subtitle: 'Version and sync status',
+              color: AppTheme.success,
+              onTap: () => _open(context, const _AppSettingsScreen()),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
         _SectionCard(
-          title: 'Profile',
+          title: 'Profile Details',
           children: [
             _InfoRow(
               icon: Icons.email_outlined,
@@ -54,56 +96,12 @@ class AccountView extends StatelessWidget {
               ),
           ],
         ),
-        const SizedBox(height: 12),
-        _SectionCard(
-          title: 'Settings',
-          children: [
-            _NavRow(
-              icon: Icons.lock_outline,
-              title: 'Security',
-              subtitle: 'Change password and reset access',
-              onTap: () => _open(
-                context,
-                _SecuritySettingsScreen(
-                  email: email,
-                  authRepository: authRepository,
-                ),
-              ),
-            ),
-            _NavRow(
-              icon: Icons.notifications_outlined,
-              title: 'Notifications',
-              subtitle: 'Phone alerts for work updates',
-              onTap: () => _open(
-                context,
-                _NotificationSettingsScreen(userId: userProfile?.uid),
-              ),
-            ),
-            _NavRow(
-              icon: Icons.support_agent_outlined,
-              title: 'Support',
-              subtitle: supportContactNumber,
-              onTap: () => _open(context, const _SupportScreen()),
-            ),
-            _NavRow(
-              icon: Icons.tune_outlined,
-              title: 'App Settings',
-              subtitle: 'Version, sync, and app information',
-              onTap: () => _open(context, const _AppSettingsScreen()),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Card(
-          child: _NavRow(
-            icon: Icons.logout,
-            title: 'Sign Out',
-            subtitle: 'Leave this device signed out',
-            danger: true,
-            onTap: authRepository == null
-                ? null
-                : () => _confirmSignOut(context),
-          ),
+        const SizedBox(height: 14),
+        _DangerActionCard(
+          icon: Icons.logout,
+          title: 'Sign Out',
+          subtitle: 'Leave this device signed out',
+          onTap: authRepository == null ? null : () => _confirmSignOut(context),
         ),
       ],
     );
@@ -140,14 +138,16 @@ class AccountView extends StatelessWidget {
   }
 }
 
-class _BrandAccountHeader extends StatelessWidget {
-  const _BrandAccountHeader({
+class _AccountHeader extends StatelessWidget {
+  const _AccountHeader({
     required this.name,
+    required this.email,
     required this.role,
     required this.team,
   });
 
   final String name;
+  final String email;
   final AppRole role;
   final String? team;
 
@@ -155,7 +155,7 @@ class _BrandAccountHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(18),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -173,22 +173,26 @@ class _BrandAccountHeader extends StatelessWidget {
                   child: Image.asset('assets/logo1.png'),
                 ),
                 const SizedBox(width: 14),
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _BrandTitle(),
-                      SizedBox(height: 4),
+                      const _BrandTitle(),
+                      const SizedBox(height: 6),
                       Text(
-                        'Integrated Service Delivery Platform',
-                        style: TextStyle(color: AppTheme.muted),
+                        email.isEmpty ? 'Signed in user' : email,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: AppTheme.muted),
                       ),
                     ],
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 16),
+            const Divider(height: 1),
+            const SizedBox(height: 16),
             Row(
               children: [
                 CircleAvatar(
@@ -242,6 +246,91 @@ class _BrandAccountHeader extends StatelessWidget {
   }
 }
 
+class _SettingsGrid extends StatelessWidget {
+  const _SettingsGrid({required this.items});
+
+  final List<_SettingsItem> items;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 720 ? 4 : 2;
+        final spacing = 10.0;
+        final tileWidth =
+            (constraints.maxWidth - (spacing * (columns - 1))) / columns;
+        return Wrap(
+          spacing: spacing,
+          runSpacing: spacing,
+          children: [
+            for (final item in items)
+              SizedBox(width: tileWidth, height: 128, child: item),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _SettingsItem extends StatelessWidget {
+  const _SettingsItem({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.color,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  IconPill(icon: icon, color: color),
+                  const Spacer(),
+                  const Icon(Icons.chevron_right, color: AppTheme.muted),
+                ],
+              ),
+              const Spacer(),
+              Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: AppTheme.muted,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _SecuritySettingsScreen extends StatefulWidget {
   const _SecuritySettingsScreen({
     required this.email,
@@ -258,14 +347,17 @@ class _SecuritySettingsScreen extends StatefulWidget {
 
 class _SecuritySettingsScreenState extends State<_SecuritySettingsScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _currentPasswordController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmController = TextEditingController();
-  bool _obscure = true;
+  bool _obscureCurrent = true;
+  bool _obscureNew = true;
   bool _saving = false;
   bool _sendingReset = false;
 
   @override
   void dispose() {
+    _currentPasswordController.dispose();
     _passwordController.dispose();
     _confirmController.dispose();
     super.dispose();
@@ -273,30 +365,73 @@ class _SecuritySettingsScreenState extends State<_SecuritySettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final password = _passwordController.text;
+
     return _SettingsScaffold(
       title: 'Security',
       icon: Icons.lock_outline,
+      subtitle: 'Protect account access and manage password recovery.',
       children: [
+        _SecurityStatusCard(email: widget.email),
+        const SizedBox(height: 12),
         _SectionCard(
           title: 'Change Password',
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+              padding: const EdgeInsets.fromLTRB(14, 4, 14, 14),
               child: Form(
                 key: _formKey,
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    const Text(
+                      'Choose a password that is hard to guess and unique to this account.',
+                      style: TextStyle(
+                        color: AppTheme.muted,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    TextFormField(
+                      controller: _currentPasswordController,
+                      obscureText: _obscureCurrent,
+                      decoration: InputDecoration(
+                        labelText: 'Current password',
+                        prefixIcon: const Icon(Icons.password_outlined),
+                        suffixIcon: IconButton(
+                          tooltip: _obscureCurrent
+                              ? 'Show password'
+                              : 'Hide password',
+                          onPressed: () => setState(
+                            () => _obscureCurrent = !_obscureCurrent,
+                          ),
+                          icon: Icon(
+                            _obscureCurrent
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined,
+                          ),
+                        ),
+                      ),
+                      validator: (value) => value?.isEmpty == true
+                          ? 'Enter your current password.'
+                          : null,
+                    ),
+                    const SizedBox(height: 12),
                     TextFormField(
                       controller: _passwordController,
-                      obscureText: _obscure,
+                      obscureText: _obscureNew,
+                      onChanged: (_) => setState(() {}),
                       decoration: InputDecoration(
                         labelText: 'New password',
                         prefixIcon: const Icon(Icons.lock_outline),
                         suffixIcon: IconButton(
-                          tooltip: _obscure ? 'Show password' : 'Hide password',
-                          onPressed: () => setState(() => _obscure = !_obscure),
+                          tooltip: _obscureNew
+                              ? 'Show password'
+                              : 'Hide password',
+                          onPressed: () =>
+                              setState(() => _obscureNew = !_obscureNew),
                           icon: Icon(
-                            _obscure
+                            _obscureNew
                                 ? Icons.visibility_outlined
                                 : Icons.visibility_off_outlined,
                           ),
@@ -306,10 +441,12 @@ class _SecuritySettingsScreenState extends State<_SecuritySettingsScreen> {
                           ? 'Use at least 8 characters.'
                           : null,
                     ),
+                    const SizedBox(height: 10),
+                    _PasswordChecklist(password: password),
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _confirmController,
-                      obscureText: _obscure,
+                      obscureText: _obscureNew,
                       decoration: const InputDecoration(
                         labelText: 'Confirm password',
                         prefixIcon: Icon(Icons.lock_reset_outlined),
@@ -328,7 +465,7 @@ class _SecuritySettingsScreenState extends State<_SecuritySettingsScreen> {
                         icon: Icon(
                           _saving ? Icons.hourglass_empty : Icons.save,
                         ),
-                        label: Text(_saving ? 'Saving' : 'Change Password'),
+                        label: Text(_saving ? 'Saving' : 'Update Password'),
                       ),
                     ),
                   ],
@@ -338,23 +475,14 @@ class _SecuritySettingsScreenState extends State<_SecuritySettingsScreen> {
           ],
         ),
         const SizedBox(height: 12),
-        _SectionCard(
-          title: 'Reset Access',
-          children: [
-            _NavRow(
-              icon: Icons.mark_email_read_outlined,
-              title: 'Send Reset Email',
-              subtitle: widget.email.isEmpty
-                  ? 'Email is not available'
-                  : 'Send link to ${widget.email}',
-              onTap:
-                  widget.email.isEmpty ||
-                      widget.authRepository == null ||
-                      _sendingReset
-                  ? null
-                  : _sendResetEmail,
-            ),
-          ],
+        _ResetAccessCard(
+          email: widget.email,
+          sending: _sendingReset,
+          enabled:
+              widget.email.isNotEmpty &&
+              widget.authRepository != null &&
+              !_sendingReset,
+          onSend: _sendResetEmail,
         ),
       ],
     );
@@ -364,14 +492,29 @@ class _SecuritySettingsScreenState extends State<_SecuritySettingsScreen> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
     try {
-      await widget.authRepository!.changePassword(_passwordController.text);
+      await widget.authRepository!.changePasswordWithCurrentPassword(
+        currentPassword: _currentPasswordController.text,
+        newPassword: _passwordController.text,
+      );
       if (!mounted) return;
+      _currentPasswordController.clear();
       _passwordController.clear();
       _confirmController.clear();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Password changed. Sign in again.')),
       );
       await widget.authRepository!.signOut();
+    } on FirebaseAuthException catch (error) {
+      if (!mounted) return;
+      final message = switch (error.code) {
+        'wrong-password' ||
+        'invalid-credential' => 'Current password is incorrect.',
+        'requires-recent-login' => 'Sign in again, then update your password.',
+        _ => 'Could not change password. $supportContactMessage',
+      };
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -407,6 +550,191 @@ class _SecuritySettingsScreenState extends State<_SecuritySettingsScreen> {
   }
 }
 
+class _SecurityStatusCard extends StatelessWidget {
+  const _SecurityStatusCard({required this.email});
+
+  final String email;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            const IconPill(
+              icon: Icons.verified_user_outlined,
+              color: AppTheme.success,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Account Protected',
+                    style: TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    email.isEmpty
+                        ? 'Password changes apply to this signed-in account.'
+                        : email,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppTheme.muted,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const StatusChip(label: 'Active', color: AppTheme.success),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PasswordChecklist extends StatelessWidget {
+  const _PasswordChecklist({required this.password});
+
+  final String password;
+
+  @override
+  Widget build(BuildContext context) {
+    final checks = [
+      _PasswordCheck('8+ characters', password.length >= 8),
+      _PasswordCheck('Upper and lower case', _hasMixedCase(password)),
+      _PasswordCheck('Number or symbol', RegExp(r'[\d\W_]').hasMatch(password)),
+    ];
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final check in checks)
+          _PasswordRequirementChip(label: check.label, met: check.met),
+      ],
+    );
+  }
+
+  static bool _hasMixedCase(String value) {
+    return RegExp(r'[a-z]').hasMatch(value) && RegExp(r'[A-Z]').hasMatch(value);
+  }
+}
+
+class _PasswordCheck {
+  const _PasswordCheck(this.label, this.met);
+
+  final String label;
+  final bool met;
+}
+
+class _PasswordRequirementChip extends StatelessWidget {
+  const _PasswordRequirementChip({required this.label, required this.met});
+
+  final String label;
+  final bool met;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = met ? AppTheme.success : AppTheme.muted;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: met ? 0.12 : 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: met ? 0.20 : 0.14)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            met ? Icons.check_circle_outline : Icons.radio_button_unchecked,
+            size: 15,
+            color: color,
+          ),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ResetAccessCard extends StatelessWidget {
+  const _ResetAccessCard({
+    required this.email,
+    required this.sending,
+    required this.enabled,
+    required this.onSend,
+  });
+
+  final String email;
+  final bool sending;
+  final bool enabled;
+  final VoidCallback onSend;
+
+  @override
+  Widget build(BuildContext context) {
+    final subtitle = email.isEmpty
+        ? 'No email address is available for this account.'
+        : 'Send a secure reset link to $email.';
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            const IconPill(
+              icon: Icons.mark_email_read_outlined,
+              color: AppTheme.secondary,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Password Reset',
+                    style: TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppTheme.muted,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            OutlinedButton.icon(
+              onPressed: enabled ? onSend : null,
+              icon: Icon(sending ? Icons.hourglass_empty : Icons.send_outlined),
+              label: Text(sending ? 'Sending' : 'Send Link'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _NotificationSettingsScreen extends StatefulWidget {
   const _NotificationSettingsScreen({required this.userId});
 
@@ -420,10 +748,8 @@ class _NotificationSettingsScreen extends StatefulWidget {
 class _NotificationSettingsScreenState
     extends State<_NotificationSettingsScreen> {
   NotificationRegistrationStatus? _status;
-  TestNotificationResult? _testResult;
   String? _lastError;
   bool _checking = false;
-  bool _sendingTest = false;
 
   @override
   Widget build(BuildContext context) {
@@ -433,14 +759,11 @@ class _NotificationSettingsScreenState
         : status.enabled
         ? 'Ready on this phone'
         : _statusDetail(status);
-    final tokenText = status?.token == null
-        ? null
-        : 'Token saved: ${status!.token!.substring(0, 12)}...';
-    final testResult = _testResult;
 
     return _SettingsScaffold(
       title: 'Notifications',
       icon: Icons.notifications_outlined,
+      subtitle: 'Register this phone for job updates and approval alerts.',
       children: [
         _SectionCard(
           title: 'Device Status',
@@ -450,19 +773,9 @@ class _NotificationSettingsScreenState
                   ? Icons.check_circle_outline
                   : Icons.info_outline,
               title: 'This Phone',
-              subtitle: tokenText == null
-                  ? statusText
-                  : '$statusText\n$tokenText',
+              subtitle: statusText,
+              color: status?.enabled == true ? AppTheme.success : null,
             ),
-            if (testResult != null)
-              _InfoRow(
-                icon: testResult.sent
-                    ? Icons.outgoing_mail
-                    : Icons.warning_amber_outlined,
-                title: 'Last Test',
-                subtitle:
-                    'Sent: ${testResult.successCount}, Failed: ${testResult.failureCount}',
-              ),
             if (_lastError != null)
               _InfoRow(
                 icon: Icons.error_outline,
@@ -472,16 +785,10 @@ class _NotificationSettingsScreenState
             _NavRow(
               icon: Icons.refresh,
               title: _checking ? 'Checking...' : 'Check Notifications',
-              subtitle: 'Request permission and save this phone token',
+              subtitle: 'Allow alerts on this device',
               onTap: _checking || widget.userId == null
                   ? null
                   : _registerThisPhone,
-            ),
-            _NavRow(
-              icon: Icons.notification_add_outlined,
-              title: _sendingTest ? 'Sending...' : 'Send Test Notification',
-              subtitle: 'Send a real push notification to this phone',
-              onTap: _sendingTest ? null : _sendTestNotification,
             ),
           ],
         ),
@@ -530,7 +837,9 @@ class _NotificationSettingsScreenState
     if (!mounted) return;
     setState(() {
       _status = status;
-      _lastError = status.error?.toString();
+      _lastError = status.error == null
+          ? null
+          : 'Notifications could not be registered. $supportContactMessage';
       _checking = false;
     });
     ScaffoldMessenger.of(context).showSnackBar(
@@ -542,56 +851,6 @@ class _NotificationSettingsScreenState
         ),
       ),
     );
-  }
-
-  Future<void> _sendTestNotification() async {
-    setState(() {
-      _sendingTest = true;
-      _lastError = null;
-    });
-    try {
-      if (widget.userId != null) {
-        final status = await NotificationService.registerCurrentDevice(
-          widget.userId!,
-          force: true,
-        );
-        if (mounted) setState(() => _status = status);
-      }
-      final result = await NotificationService.sendTestNotification();
-      if (!mounted) return;
-      setState(() => _testResult = result);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            result.sent
-                ? 'Test notification sent. Check this phone.'
-                : 'Firebase found no successful sends. $supportContactMessage',
-          ),
-        ),
-      );
-    } on FirebaseFunctionsException catch (error) {
-      if (!mounted) return;
-      setState(() => _lastError = '${error.code}: ${error.message}');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Could not send test notification: ${error.code}. $supportContactMessage',
-          ),
-        ),
-      );
-    } catch (error) {
-      if (!mounted) return;
-      setState(() => _lastError = error.toString());
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Could not send test notification. $supportContactMessage',
-          ),
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => _sendingTest = false);
-    }
   }
 
   String _statusDetail(NotificationRegistrationStatus status) {
@@ -612,6 +871,7 @@ class _SupportScreen extends StatelessWidget {
     return const _SettingsScaffold(
       title: 'Support',
       icon: Icons.support_agent_outlined,
+      subtitle: 'Get help with account access, submissions, and approvals.',
       children: [
         _SectionCard(
           title: 'Contact',
@@ -662,6 +922,7 @@ class _AppSettingsScreen extends StatelessWidget {
     return _SettingsScaffold(
       title: 'App Settings',
       icon: Icons.tune_outlined,
+      subtitle: 'Application details and cloud sync information.',
       children: [
         const _SectionCard(
           title: 'Application',
@@ -679,7 +940,7 @@ class _AppSettingsScreen extends StatelessWidget {
             _InfoRow(
               icon: Icons.cloud_done_outlined,
               title: 'Sync',
-              subtitle: 'Firebase cloud sync enabled',
+              subtitle: 'Cloud sync enabled',
             ),
           ],
         ),
@@ -715,11 +976,13 @@ class _SettingsScaffold extends StatelessWidget {
   const _SettingsScaffold({
     required this.title,
     required this.icon,
+    required this.subtitle,
     required this.children,
   });
 
   final String title;
   final IconData icon;
+  final String subtitle;
   final List<Widget> children;
 
   @override
@@ -729,16 +992,53 @@ class _SettingsScaffold extends StatelessWidget {
       appBar: AppBar(title: Text(title)),
       body: AppScrollView(
         children: [
-          Row(
-            children: [
-              IconPill(icon: icon, color: AppTheme.primary),
-              const SizedBox(width: 12),
-              SectionTitle(title),
-            ],
-          ),
-          const SizedBox(height: 12),
+          _SettingsHeader(icon: icon, title: title, subtitle: subtitle),
+          const SizedBox(height: 14),
           ...children,
         ],
+      ),
+    );
+  }
+}
+
+class _SettingsHeader extends StatelessWidget {
+  const _SettingsHeader({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            IconPill(icon: icon, color: AppTheme.primary),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SectionTitle(title),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      color: AppTheme.muted,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -785,18 +1085,28 @@ class _InfoRow extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.subtitle,
+    this.color,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
+    final iconColor = color ?? Theme.of(context).colorScheme.primary;
     return ListTile(
-      leading: Icon(icon, color: Theme.of(context).colorScheme.primary),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+      leading: IconPill(icon: icon, color: iconColor),
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w900)),
-      subtitle: Text(subtitle),
+      subtitle: Text(
+        subtitle,
+        style: const TextStyle(
+          color: AppTheme.muted,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 }
@@ -823,7 +1133,8 @@ class _NavRow extends StatelessWidget {
         : Theme.of(context).colorScheme.primary;
     return ListTile(
       enabled: onTap != null,
-      leading: Icon(icon, color: color),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+      leading: IconPill(icon: icon, color: color),
       title: Text(
         title,
         style: TextStyle(
@@ -834,6 +1145,33 @@ class _NavRow extends StatelessWidget {
       subtitle: Text(subtitle),
       trailing: const Icon(Icons.chevron_right),
       onTap: onTap,
+    );
+  }
+}
+
+class _DangerActionCard extends StatelessWidget {
+  const _DangerActionCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: _NavRow(
+        icon: icon,
+        title: title,
+        subtitle: subtitle,
+        danger: true,
+        onTap: onTap,
+      ),
     );
   }
 }
