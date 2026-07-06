@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
 import 'package:isdp/app/isdp_app.dart';
 import 'package:isdp/core/domain/app_role.dart';
 import 'package:isdp/features/auth/domain/auth_repository.dart';
@@ -14,6 +15,39 @@ import 'package:isdp/features/isdp/presentation/completion_details_screen.dart';
 import 'package:isdp/features/isdp/presentation/upload_evidence_screen.dart';
 
 void main() {
+  test('evidence photos are resized and encoded as compact JPEGs', () async {
+    final source = img.Image(width: 1400, height: 900);
+    final compressed = await compressEvidenceImage(img.encodePng(source));
+    final decoded = img.decodeJpg(compressed);
+
+    expect(compressed.length, lessThanOrEqualTo(450000));
+    expect(decoded, isNotNull);
+    expect(decoded!.width, lessThanOrEqualTo(1024));
+    expect(decoded.height, lessThanOrEqualTo(1024));
+  });
+
+  test('work-order access fields survive serialization', () {
+    const order = WorkOrder(
+      id: 'WO-ACCESS',
+      site: 'Test site',
+      address: 'Test address',
+      scope: 'Test scope',
+      sla: 'Due in 24 hours',
+      siteCode: 'SITE-ACCESS',
+      status: 'Dispatched',
+      priority: Priority.high,
+      supervisorId: 'supervisor-1',
+      assignedTechnicianIds: ['technician-1'],
+      isOpen: true,
+    );
+
+    final restored = WorkOrder.fromMap(order.id, order.toMap());
+
+    expect(restored.supervisorId, 'supervisor-1');
+    expect(restored.assignedTechnicianIds, ['technician-1']);
+    expect(restored.isOpen, isTrue);
+  });
+
   test('customer signature can be stored and restored', () {
     final encoded = encodeSignature([
       const [Offset(0.1, 0.2), Offset(0.8, 0.7)],

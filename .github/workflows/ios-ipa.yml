@@ -1,0 +1,87 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-ios:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          architecture: x64
+
+      - name: Disable Flutter Swift Package Manager
+        run: flutter config --no-enable-swift-package-manager
+
+      - name: Show versions
+        run: |
+          flutter doctor -v
+          xcodebuild -version
+          swift --version
+
+      - name: Clean project
+        run: flutter clean
+
+      - name: Remove old iOS build files
+        run: |
+          rm -rf ios/Pods
+          rm -rf ios/Podfile.lock
+          rm -rf ios/.symlinks
+          rm -rf ios/Flutter/ephemeral
+          rm -rf build/ios
+
+      - name: Get packages
+        run: flutter pub get
+
+      - name: Install pods
+        run: |
+          cd ios
+          pod install --repo-update
+          cd ..
+
+      - name: Build iOS config only
+        run: flutter build ios --release --no-codesign --config-only
+
+      - name: Build Runner.app with signing disabled
+        run: |
+          xcodebuild \
+            -workspace ios/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build/ios \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            clean build
+
+      - name: Find Runner.app
+        run: |
+          find build/ios -name "Runner.app" -type d
+
+      - name: Create unsigned IPA
+        run: |
+          APP_PATH=$(find build/ios -name "Runner.app" -type d | head -n 1)
+          echo "Using app path: $APP_PATH"
+          mkdir -p build/ios/ipa/Payload
+          cp -R "$APP_PATH" build/ios/ipa/Payload/Runner.app
+          cd build/ios/ipa
+          zip -r Runner-unsigned.ipa Payload
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Runner-unsigned-ipa
+          path: build/ios/ipa/Runner-unsigned.ipa

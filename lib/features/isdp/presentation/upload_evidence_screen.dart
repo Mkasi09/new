@@ -1,7 +1,7 @@
-import 'dart:typed_data';
-
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 
 import '../../../app/theme/app_theme.dart';
@@ -176,29 +176,28 @@ class _UploadEvidenceScreenState extends State<UploadEvidenceScreen> {
         source: source,
         maxWidth: 1024,
         maxHeight: 1024,
-        imageQuality: 60,
+        imageQuality: 85,
       );
       if (image == null) return;
 
-      final bytes = await image.readAsBytes();
+      final bytes = await compressEvidenceImage(await image.readAsBytes());
       if (bytes.length > _maxPhotoBytes) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'This photo is too large. Choose a smaller image or use the camera.',
+              'This photo could not be compressed enough. Choose a different image.',
             ),
           ),
         );
         return;
       }
-      final mimeType = image.mimeType ?? 'image/jpeg';
       final uploader = widget.uploadPhoto ?? _uploadEvidencePhoto;
       final photoData = await uploader(
         order: widget.order,
         slot: slot,
         bytes: bytes,
-        contentType: mimeType,
+        contentType: 'image/jpeg',
       );
       if (!mounted) return;
 
@@ -251,6 +250,52 @@ typedef EvidencePhotoUploader =
       required String contentType,
     });
 
+const _targetEvidencePhotoBytes = 450000;
+
+Future<Uint8List> compressEvidenceImage(Uint8List bytes) {
+  return compute(_compressEvidenceImageSync, bytes);
+}
+
+Uint8List _compressEvidenceImageSync(Uint8List bytes) {
+  final decoded = img.decodeImage(bytes);
+  if (decoded == null) {
+    throw const FormatException('The selected file is not a supported image.');
+  }
+
+  var working = img.bakeOrientation(decoded);
+  if (working.width > 1024 || working.height > 1024) {
+    working = working.width >= working.height
+        ? img.copyResize(
+            working,
+            width: 1024,
+            interpolation: img.Interpolation.average,
+          )
+        : img.copyResize(
+            working,
+            height: 1024,
+            interpolation: img.Interpolation.average,
+          );
+  }
+
+  Uint8List encoded = img.encodeJpg(working, quality: 72);
+  for (final quality in const [64, 56, 48, 40]) {
+    if (encoded.length <= _targetEvidencePhotoBytes) return encoded;
+    encoded = img.encodeJpg(working, quality: quality);
+  }
+
+  while (encoded.length > _targetEvidencePhotoBytes &&
+      (working.width > 480 || working.height > 480)) {
+    working = img.copyResize(
+      working,
+      width: (working.width * 0.82).round(),
+      height: (working.height * 0.82).round(),
+      interpolation: img.Interpolation.average,
+    );
+    encoded = img.encodeJpg(working, quality: 40);
+  }
+  return encoded;
+}
+
 Future<String> _uploadEvidencePhoto({
   required WorkOrder order,
   required String slot,
@@ -267,6 +312,7 @@ Future<String> _uploadEvidencePhoto({
     bytes,
     SettableMetadata(
       contentType: contentType,
+      cacheControl: 'private,max-age=86400',
       customMetadata: {'workOrderId': order.id, 'slot': slot},
     ),
   );

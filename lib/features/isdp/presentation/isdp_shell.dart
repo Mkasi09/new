@@ -94,7 +94,9 @@ class _IsdpShellState extends State<IsdpShell> {
   @override
   void initState() {
     super.initState();
-    unawaited(_loadTechnicians());
+    if (_role != AppRole.technician) {
+      unawaited(_loadTechnicians());
+    }
     unawaited(_loadReadNotifications());
   }
 
@@ -366,6 +368,7 @@ class _IsdpShellState extends State<IsdpShell> {
     final profile = widget.userProfile;
     if (profile == null) return true;
     final values = [
+      ...order.assignedTechnicianIds,
       order.assignedTo,
       ...order.assignedTechnicians,
       ...order.technicianNames,
@@ -891,6 +894,7 @@ class _IsdpShellState extends State<IsdpShell> {
     final accepted = order.copyWith(
       status: 'Accepted by Supervisor',
       supervisor: supervisor,
+      supervisorId: widget.userProfile?.uid,
     );
     await _repository.acceptWorkOrder(accepted);
     _replaceOrder(accepted);
@@ -945,10 +949,18 @@ class _IsdpShellState extends State<IsdpShell> {
     final order = _assigningOrder;
     if (order == null) return;
     final names = assignedTo.map(displayPersonName).toSet().toList()..sort();
+    final ids =
+        _technicians
+            .where((technician) => names.contains(technician.name))
+            .map((technician) => technician.uid)
+            .toSet()
+            .toList()
+          ..sort();
     final assigned = order.copyWith(
       status: 'Dispatched',
       assignedTo: names.join(', '),
       assignedTechnicians: names,
+      assignedTechnicianIds: ids,
     );
     await _repository.assignWorkOrder(assigned);
     _replaceOrder(assigned);

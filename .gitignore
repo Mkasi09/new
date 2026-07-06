@@ -37,6 +37,9 @@ functions/.firebase/
 functions/.env
 functions/.env.*
 !functions/.env.example
+load-test/node_modules/
+load-test/.env
+load-test/reports/
 .firebase/
 
 # Symbolication related

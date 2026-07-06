@@ -38,12 +38,24 @@ service cloud.firestore {
           !request.resource.data.diff(resource.data).affectedKeys()
             .hasAny(['mustChangePassword']) ||
           request.resource.data.mustChangePassword == false
+<<<<<<< HEAD
+        );
+
+      match /chat_unread/{orderId} {
+        allow read: if signedIn() && request.auth.uid == userId;
+        allow create, update: if signedIn() &&
+          request.auth.uid == userId &&
+          request.resource.data.count == 0;
+        allow delete: if false;
+      }
+=======
         )
       ) || (
         isAdmin() &&
         request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(['team'])
       );
+>>>>>>> fe0d8aa8942866d04708b81b87a8ba88df48210d
     }
 
     match /work_orders/{orderId} {

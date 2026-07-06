@@ -54,7 +54,10 @@ class AuthGate extends StatelessWidget {
               initialRole: profileSnapshot.data!.role,
               userProfile: profileSnapshot.data,
               authRepository: authRepository,
-              isdpRepository: FirebaseIsdpRepository(),
+              isdpRepository: FirebaseIsdpRepository(
+                role: profileSnapshot.data!.role,
+                userId: profileSnapshot.data!.uid,
+              ),
             );
           },
         );
