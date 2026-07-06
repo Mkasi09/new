@@ -27,7 +27,27 @@ jobs:
         run: flutter pub get
 
       - name: Build iOS application
-        run: flutter build ios --release --no-codesign
+        shell: bash
+        run: |
+          set -o pipefail
+          flutter build ios --release --no-codesign --verbose 2>&1 | tee build-ios.log
+
+      - name: Show relevant build errors
+        if: failure()
+        shell: bash
+        run: |
+          echo "::group::Compiler errors"
+          grep -nEi -B 3 -A 8 '(^|[[:space:]])(error:|fatal error:|exception:)|BUILD FAILED|Could not build' build-ios.log | tail -n 300 || true
+          echo "::endgroup::"
+
+      - name: Upload complete build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-log
+          path: build-ios.log
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Package unsigned IPA
         run: |
