@@ -29,25 +29,22 @@ jobs:
       - name: Clean project
         run: flutter clean
 
-      - name: Remove old iOS build files
-        run: |
-          rm -rf ios/Pods
-          rm -rf ios/Podfile.lock
-          rm -rf ios/.symlinks
-          rm -rf ios/Flutter/ephemeral
-          rm -rf build/ios
-
       - name: Get packages
         run: flutter pub get
 
-      - name: Install pods
+      - name: Disable iOS signing
         run: |
-          cd ios
-          pod install --repo-update
-          cd ..
+          /usr/libexec/PlistBuddy -c "Set :objects:97C146ED1CF9000F007C117D:attributes:TargetAttributes:97C146ED1CF9000F007C117D:DevelopmentTeam ''" ios/Runner.xcodeproj/project.pbxproj || true
+          sed -i '' 's/DEVELOPMENT_TEAM = [A-Z0-9]*;/DEVELOPMENT_TEAM = "";/g' ios/Runner.xcodeproj/project.pbxproj
+          sed -i '' 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' ios/Runner.xcodeproj/project.pbxproj
+          sed -i '' 's/CODE_SIGN_IDENTITY = "Apple Development";/CODE_SIGN_IDENTITY = "";/g' ios/Runner.xcodeproj/project.pbxproj
+          sed -i '' 's/"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "Apple Development";/"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "";/g' ios/Runner.xcodeproj/project.pbxproj
+          sed -i '' 's/PROVISIONING_PROFILE_SPECIFIER = .*;/PROVISIONING_PROFILE_SPECIFIER = "";/g' ios/Runner.xcodeproj/project.pbxproj
 
       - name: Build iOS app without codesign
-        run: flutter build ios --release --no-codesign
+        run: |
+          flutter build ios --release --no-codesign \
+            --dart-define=CODE_SIGNING_ALLOWED=NO
 
       - name: Create unsigned IPA
         run: |
