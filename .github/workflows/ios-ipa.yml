@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-ios:
-    runs-on: macos-14
+    runs-on: macos-15
 
     steps:
       - name: Checkout project
@@ -20,14 +20,31 @@ jobs:
           channel: stable
           architecture: x64
 
-      - name: Flutter doctor
-        run: flutter doctor -v
+      - name: Show versions
+        run: |
+          flutter doctor -v
+          xcodebuild -version
+          swift --version
 
-      - name: Clean old build
+      - name: Clean project
         run: flutter clean
+
+      - name: Remove old iOS build files
+        run: |
+          rm -rf ios/Pods
+          rm -rf ios/Podfile.lock
+          rm -rf ios/.symlinks
+          rm -rf ios/Flutter/ephemeral
+          rm -rf build/ios
 
       - name: Get packages
         run: flutter pub get
+
+      - name: Install pods
+        run: |
+          cd ios
+          pod install --repo-update
+          cd ..
 
       - name: Build iOS app without codesign
         run: flutter build ios --release --no-codesign
