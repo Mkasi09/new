@@ -584,6 +584,9 @@ double workOrderProgress(WorkOrder order) {
 
 String workOrderStageLabel(WorkOrder order) {
   if (order.status == 'Approved') return 'Approved';
+  if (order.status == 'Declined') return 'Correction required';
+  if (order.status == 'Declined - Closed') return 'Declined and closed';
+  if (order.status == 'Closed') return 'Closed';
   if (order.status == 'Submitted') return 'Awaiting review';
   if (order.evidenceSlots.contains('after')) return 'Ready to submit';
   if (order.evidenceSlots.contains('before')) return 'Work in progress';
@@ -610,6 +613,11 @@ Color workOrderStatusColor(String status) {
       return AppTheme.success;
     case 'Approved':
       return AppTheme.success;
+    case 'Declined':
+    case 'Declined - Closed':
+      return AppTheme.danger;
+    case 'Closed':
+      return AppTheme.muted;
     case 'On Site':
     case 'Onsite':
       return AppTheme.secondary;

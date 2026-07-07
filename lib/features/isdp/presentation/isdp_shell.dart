@@ -20,9 +20,11 @@ import 'assign_technician_screen.dart';
 import 'create_job_screen.dart';
 import 'completion_details_screen.dart';
 import 'dashboard_view.dart';
+import 'decline_job_screen.dart';
 import 'empty_jobs_view.dart';
 import 'job_chat_screen.dart';
 import 'job_chats_screen.dart';
+import 'mobile_billing_preview.dart';
 import 'qr_arrival_scan_screen.dart';
 import 'review_job_screen.dart';
 import 'review_queue_screen.dart';
@@ -40,6 +42,8 @@ enum _WorkflowView {
   analytics,
   reviewQueue,
   reviewJob,
+  declineJob,
+  billingPreview,
   jobChats,
   supervisorQueue,
   supervisorJob,
@@ -88,6 +92,7 @@ class _IsdpShellState extends State<IsdpShell> {
   final Set<String> _notificationKeys = {};
   final Set<String> _readNotificationKeys = {};
   final Set<String> _pendingCreateIds = {};
+  final List<_NavigationSnapshot> _navigationHistory = [];
   List<AppUserProfile> _technicians = const [];
   bool _notificationsInitialized = false;
 
@@ -169,6 +174,9 @@ class _IsdpShellState extends State<IsdpShell> {
                   onCreateJob: _openCreateJobScreen,
                   onOpenAnalytics: _openAnalyticsScreen,
                   onOpenReviewQueue: _openReviewQueueScreen,
+                  onOpenBilling: mobileBillingPreviewEnabled
+                      ? _openBillingPreview
+                      : null,
                   onAddUser: widget.authRepository == null
                       ? null
                       : _openAddUserScreen,
@@ -181,6 +189,7 @@ class _IsdpShellState extends State<IsdpShell> {
                   onUploadEvidence: _uploadEvidence,
                   onOpenCompletionDetails: _openCompletionDetails,
                   onSubmitCompletion: _submitCompletion,
+                  onCloseDeclinedJob: _closeDeclinedJob,
                   onOpenJobChat: _openJobChat,
                   onOpenJobChats: _openJobChatsScreen,
                 ),
@@ -228,6 +237,8 @@ class _IsdpShellState extends State<IsdpShell> {
   }
 
   void _selectTab(int value) {
+    if (value == _tab) return;
+    _rememberNavigation();
     setState(() {
       _tab = value;
       if (value != 1) {
@@ -240,12 +251,8 @@ class _IsdpShellState extends State<IsdpShell> {
   }
 
   Future<void> _handlePhoneBack() async {
-    if (_workflowView == _WorkflowView.supervisorJob) {
-      _openSupervisorQueueScreen();
-      return;
-    }
-    if (_workflowView == _WorkflowView.reviewJob && _returnToReviewQueue) {
-      _openReviewQueueScreen();
+    if (_navigationHistory.isNotEmpty) {
+      _navigateBack();
       return;
     }
     if (_workflowView != null) {
@@ -304,6 +311,57 @@ class _IsdpShellState extends State<IsdpShell> {
     _uploadCompleter = null;
   }
 
+  void _rememberNavigation() {
+    _navigationHistory.add(
+      _NavigationSnapshot(
+        tab: _tab,
+        workflowView: _workflowView,
+        selectedOrderId: _selectedOrderId,
+        assigningOrder: _assigningOrder,
+        scanningOrder: _scanningOrder,
+        uploadingOrder: _uploadingOrder,
+        uploadingEvidenceSlot: _uploadingEvidenceSlot,
+        completionOrder: _completionOrder,
+        reviewingOrder: _reviewingOrder,
+        supervisorOrder: _supervisorOrder,
+        adminOrder: _adminOrder,
+        returnToReviewQueue: _returnToReviewQueue,
+      ),
+    );
+  }
+
+  void _navigateBack() {
+    if (_navigationHistory.isEmpty) {
+      _closeWorkflow();
+      return;
+    }
+    final scanCompleter = _scanCompleter;
+    if (scanCompleter != null && !scanCompleter.isCompleted) {
+      scanCompleter.complete(null);
+    }
+    final uploadCompleter = _uploadCompleter;
+    if (uploadCompleter != null && !uploadCompleter.isCompleted) {
+      uploadCompleter.complete(null);
+    }
+    _scanCompleter = null;
+    _uploadCompleter = null;
+    final previous = _navigationHistory.removeLast();
+    setState(() {
+      _tab = previous.tab;
+      _workflowView = previous.workflowView;
+      _selectedOrderId = previous.selectedOrderId;
+      _assigningOrder = previous.assigningOrder;
+      _scanningOrder = previous.scanningOrder;
+      _uploadingOrder = previous.uploadingOrder;
+      _uploadingEvidenceSlot = previous.uploadingEvidenceSlot;
+      _completionOrder = previous.completionOrder;
+      _reviewingOrder = previous.reviewingOrder;
+      _supervisorOrder = previous.supervisorOrder;
+      _adminOrder = previous.adminOrder;
+      _returnToReviewQueue = previous.returnToReviewQueue;
+    });
+  }
+
   WorkOrder? _selectedOrder(List<WorkOrder> orders) {
     if (orders.isEmpty) return null;
     if (_selectedOrderId != null) {
@@ -332,11 +390,7 @@ class _IsdpShellState extends State<IsdpShell> {
         orders
             .where(
               (order) =>
-                  order.status != 'Approved' &&
-                  _matchesCurrentUser(
-                    order.supervisor,
-                    includeUnassigned: true,
-                  ),
+                  _matchesCurrentSupervisor(order, includeUnassigned: true),
             )
             .toList(),
       AppRole.technician =>
@@ -347,6 +401,8 @@ class _IsdpShellState extends State<IsdpShell> {
                   (order.status == 'Dispatched' ||
                       order.status == 'On Site' ||
                       order.status == 'Submitted' ||
+                      order.status == 'Declined' ||
+                      order.status == 'Declined - Closed' ||
                       order.status == 'Approved'),
             )
             .toList(),
@@ -374,6 +430,22 @@ class _IsdpShellState extends State<IsdpShell> {
       ...order.technicianNames,
     ];
     return values.any((value) => _matchesCurrentUser(value));
+  }
+
+  bool _matchesCurrentSupervisor(
+    WorkOrder order, {
+    bool includeUnassigned = false,
+  }) {
+    final profile = widget.userProfile;
+    if (profile == null) return true;
+    if (order.supervisorId?.trim().isNotEmpty == true) {
+      return order.supervisorId!.trim().toLowerCase() ==
+          profile.uid.trim().toLowerCase();
+    }
+    return _matchesCurrentUser(
+      order.supervisor,
+      includeUnassigned: includeUnassigned,
+    );
   }
 
   Future<void> _loadTechnicians() async {
@@ -456,28 +528,28 @@ class _IsdpShellState extends State<IsdpShell> {
         role: _role,
         workOrders: visibleOrders,
         onOpenJob: _openJobFromAnalytics,
-        onClose: _closeWorkflow,
+        onClose: _navigateBack,
       ),
       _WorkflowView.reviewQueue => ReviewQueueScreen(
         orders: visibleOrders,
         onOpenReview: _openReviewScreenFromQueue,
-        onClose: _closeWorkflow,
+        onClose: _navigateBack,
       ),
       _WorkflowView.jobChats => JobChatsScreen(
         orders: visibleOrders,
         repository: _repository,
         onOpenChat: _openJobChat,
-        onClose: _closeWorkflow,
+        onClose: _navigateBack,
       ),
       _WorkflowView.supervisorQueue => SupervisorQueueScreen(
         orders: visibleOrders,
         onOpenJob: _openSupervisorJobScreen,
-        onClose: _closeWorkflow,
+        onClose: _navigateBack,
       ),
       _WorkflowView.supervisorJob => _buildSupervisorJobPage(visibleOrders),
       _WorkflowView.createJob => CreateJobScreen(
         onCreated: _createJob,
-        onCancel: _closeWorkflow,
+        onCancel: _navigateBack,
       ),
       _WorkflowView.addUser when widget.authRepository != null => AddUserScreen(
         authRepository: widget.authRepository!,
@@ -487,8 +559,8 @@ class _IsdpShellState extends State<IsdpShell> {
         AssignTechnicianScreen(
           order: _assigningOrder!,
           technicians: _technicians,
-          onAssigned: _completeAssignment,
-          onCancel: _closeWorkflow,
+          onTechniciansAssigned: _completeAssignment,
+          onCancel: _navigateBack,
         ),
       _WorkflowView.scanQr when _scanningOrder != null => QrArrivalScanScreen(
         order: _scanningOrder!,
@@ -506,9 +578,19 @@ class _IsdpShellState extends State<IsdpShell> {
         CompletionDetailsScreen(
           order: _completionOrder!,
           onSaved: _saveCompletionDetails,
-          onCancel: _closeWorkflow,
+          onCancel: _navigateBack,
         ),
       _WorkflowView.reviewJob => _buildReviewPage(visibleOrders),
+      _WorkflowView.declineJob when _reviewingOrder != null => DeclineJobScreen(
+        order: _reviewingOrder!,
+        onDecline: _completeDecline,
+        onCancel: _openReviewAfterDeclineCancel,
+      ),
+      _WorkflowView.billingPreview => MobileBillingPreview(
+        orders: visibleOrders,
+        onClose: _navigateBack,
+        onOpenJob: _openAdminJob,
+      ),
       _ => null,
     };
   }
@@ -527,7 +609,7 @@ class _IsdpShellState extends State<IsdpShell> {
       onAssign: () => _assignOrder(order),
       onOpenChat: () => _openJobChat(order),
       unreadChatStream: _repository.watchUnreadJobMessageCount(order.id),
-      onClose: _openSupervisorQueueScreen,
+      onClose: _navigateBack,
     );
   }
 
@@ -541,10 +623,11 @@ class _IsdpShellState extends State<IsdpShell> {
     return AdminJobScreen(
       order: order,
       onSendQr: () => _sendQr(order),
+      onReview: () => _openReviewScreen(order),
       onOpenChat: () => _openJobChat(order),
       unreadChatStream: _repository.watchUnreadJobMessageCount(order.id),
       onDelete: () => _confirmDeleteOrder(order),
-      onClose: _closeAdminJob,
+      onClose: _navigateBack,
     );
   }
 
@@ -559,11 +642,15 @@ class _IsdpShellState extends State<IsdpShell> {
     return ReviewJobScreen(
       order: order,
       onApprove: () => _approveFromReview(order),
-      onClose: _returnToReviewQueue ? _openReviewQueueScreen : _closeWorkflow,
+      onDecline: () => _openDeclineScreen(order),
+      onClose: _navigateBack,
     );
   }
 
   void _closeWorkflow() {
+    if (_navigationHistory.isNotEmpty) {
+      _navigationHistory.removeLast();
+    }
     setState(() {
       _workflowView = null;
       _assigningOrder = null;
@@ -578,7 +665,7 @@ class _IsdpShellState extends State<IsdpShell> {
   }
 
   void _closeAddUserScreen() {
-    _closeWorkflow();
+    _navigateBack();
     unawaited(_loadTechnicians());
   }
 
@@ -591,6 +678,7 @@ class _IsdpShellState extends State<IsdpShell> {
       _openSupervisorJobScreen(order);
       return;
     }
+    _rememberNavigation();
     setState(() {
       _selectedOrderId = order.id;
       _tab = 0;
@@ -610,6 +698,7 @@ class _IsdpShellState extends State<IsdpShell> {
   }
 
   void _openAdminJob(WorkOrder order) {
+    _rememberNavigation();
     setState(() {
       _adminOrder = order;
       _selectedOrderId = order.id;
@@ -743,6 +832,7 @@ class _IsdpShellState extends State<IsdpShell> {
   }
 
   void _openCreateJobScreen() {
+    _rememberNavigation();
     setState(() {
       _workflowView = _WorkflowView.createJob;
       _assigningOrder = null;
@@ -756,6 +846,7 @@ class _IsdpShellState extends State<IsdpShell> {
   }
 
   void _openAnalyticsScreen() {
+    _rememberNavigation();
     setState(() {
       _workflowView = _WorkflowView.analytics;
       _assigningOrder = null;
@@ -768,7 +859,17 @@ class _IsdpShellState extends State<IsdpShell> {
     });
   }
 
+  void _openBillingPreview() {
+    _rememberNavigation();
+    setState(() {
+      _clearWorkflowState();
+      _workflowView = _WorkflowView.billingPreview;
+      _tab = 0;
+    });
+  }
+
   void _openAddUserScreen() {
+    _rememberNavigation();
     setState(() {
       _clearWorkflowState();
       _workflowView = _WorkflowView.addUser;
@@ -777,6 +878,7 @@ class _IsdpShellState extends State<IsdpShell> {
   }
 
   void _openReviewQueueScreen() {
+    _rememberNavigation();
     setState(() {
       _workflowView = _WorkflowView.reviewQueue;
       _assigningOrder = null;
@@ -790,6 +892,7 @@ class _IsdpShellState extends State<IsdpShell> {
   }
 
   void _openJobChatsScreen() {
+    _rememberNavigation();
     setState(() {
       _workflowView = _WorkflowView.jobChats;
       _assigningOrder = null;
@@ -803,6 +906,7 @@ class _IsdpShellState extends State<IsdpShell> {
   }
 
   void _openSupervisorQueueScreen() {
+    _rememberNavigation();
     setState(() {
       _workflowView = _WorkflowView.supervisorQueue;
       _assigningOrder = null;
@@ -816,6 +920,7 @@ class _IsdpShellState extends State<IsdpShell> {
   }
 
   void _openSupervisorJobScreen(WorkOrder order) {
+    _rememberNavigation();
     setState(() {
       _workflowView = _WorkflowView.supervisorJob;
       _supervisorOrder = order;
@@ -830,6 +935,7 @@ class _IsdpShellState extends State<IsdpShell> {
   }
 
   void _openReviewScreen(WorkOrder order) {
+    _rememberNavigation();
     setState(() {
       _workflowView = _WorkflowView.reviewJob;
       _reviewingOrder = order;
@@ -844,6 +950,7 @@ class _IsdpShellState extends State<IsdpShell> {
   }
 
   void _openReviewScreenFromQueue(WorkOrder order) {
+    _rememberNavigation();
     setState(() {
       _workflowView = _WorkflowView.reviewJob;
       _reviewingOrder = order;
@@ -864,6 +971,7 @@ class _IsdpShellState extends State<IsdpShell> {
       final saved = await _repository.createWorkOrder(created);
       if (!mounted) return;
       _knownOrders[saved.id] = saved;
+      if (_navigationHistory.isNotEmpty) _navigationHistory.removeLast();
       setState(() {
         _workOrders = [
           saved,
@@ -905,7 +1013,11 @@ class _IsdpShellState extends State<IsdpShell> {
   }
 
   Future<void> _approveOrder(WorkOrder order) async {
-    final approved = order.copyWith(status: 'Approved', sla: 'Approved');
+    final approved = order.copyWith(
+      status: 'Approved',
+      sla: 'Approved',
+      approvedAt: DateTime.now(),
+    );
     await _repository.approveWorkOrder(order);
     _replaceOrder(approved);
     if (!mounted) return;
@@ -933,6 +1045,7 @@ class _IsdpShellState extends State<IsdpShell> {
 
     await _loadTechnicians();
     if (!mounted) return;
+    _rememberNavigation();
     setState(() {
       _workflowView = _WorkflowView.assignTechnician;
       _assigningOrder = order;
@@ -945,17 +1058,31 @@ class _IsdpShellState extends State<IsdpShell> {
     });
   }
 
-  Future<void> _completeAssignment(List<String> assignedTo) async {
+  Future<void> _completeAssignment(
+    List<AppUserProfile> assignedTechnicians,
+  ) async {
     final order = _assigningOrder;
     if (order == null) return;
-    final names = assignedTo.map(displayPersonName).toSet().toList()..sort();
-    final ids =
-        _technicians
-            .where((technician) => names.contains(technician.name))
-            .map((technician) => technician.uid)
+    final names =
+        assignedTechnicians
+            .map((technician) => displayPersonName(technician.name))
             .toSet()
             .toList()
           ..sort();
+    final ids =
+        assignedTechnicians
+            .map((technician) => technician.uid)
+            .where((uid) => uid.trim().isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
+    if (ids.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not identify the technician.')),
+      );
+      return;
+    }
     final assigned = order.copyWith(
       status: 'Dispatched',
       assignedTo: names.join(', '),
@@ -974,6 +1101,7 @@ class _IsdpShellState extends State<IsdpShell> {
   Future<bool?> _scanArrival(WorkOrder order) {
     _scanCompleter?.complete(null);
     final completer = Completer<bool?>();
+    _rememberNavigation();
     setState(() {
       _scanCompleter = completer;
       _workflowView = _WorkflowView.scanQr;
@@ -1011,11 +1139,8 @@ class _IsdpShellState extends State<IsdpShell> {
     if (completer != null && !completer.isCompleted) {
       completer.complete(matched);
     }
-    setState(() {
-      _scanCompleter = null;
-      _workflowView = null;
-      _scanningOrder = null;
-    });
+    _scanCompleter = null;
+    _navigateBack();
   }
 
   void _cancelScan() {
@@ -1023,16 +1148,14 @@ class _IsdpShellState extends State<IsdpShell> {
     if (completer != null && !completer.isCompleted) {
       completer.complete(null);
     }
-    setState(() {
-      _scanCompleter = null;
-      _workflowView = null;
-      _scanningOrder = null;
-    });
+    _scanCompleter = null;
+    _navigateBack();
   }
 
   Future<List<String>?> _uploadEvidence(WorkOrder order, String? slot) {
     _uploadCompleter?.complete(null);
     final completer = Completer<List<String>?>();
+    _rememberNavigation();
     setState(() {
       _uploadCompleter = completer;
       _workflowView = _WorkflowView.uploadEvidence;
@@ -1085,12 +1208,8 @@ class _IsdpShellState extends State<IsdpShell> {
     if (completer != null && !completer.isCompleted) {
       completer.complete(evidenceSlots);
     }
-    setState(() {
-      _uploadCompleter = null;
-      _workflowView = null;
-      _uploadingOrder = null;
-      _uploadingEvidenceSlot = null;
-    });
+    _uploadCompleter = null;
+    _navigateBack();
   }
 
   void _cancelUpload() {
@@ -1098,12 +1217,8 @@ class _IsdpShellState extends State<IsdpShell> {
     if (completer != null && !completer.isCompleted) {
       completer.complete(null);
     }
-    setState(() {
-      _uploadCompleter = null;
-      _workflowView = null;
-      _uploadingOrder = null;
-      _uploadingEvidenceSlot = null;
-    });
+    _uploadCompleter = null;
+    _navigateBack();
   }
 
   Future<void> _submitCompletion(WorkOrder order) async {
@@ -1126,6 +1241,32 @@ class _IsdpShellState extends State<IsdpShell> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('${order.id} submitted for Admin approval.')),
     );
+  }
+
+  Future<void> _closeDeclinedJob(WorkOrder order) async {
+    if (order.status != 'Declined') return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Close declined job?'),
+        content: const Text(
+          'This ends the job without resubmitting it for approval.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Close Job'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await _repository.closeWorkOrder(order);
+    _replaceOrder(order.copyWith(status: 'Closed', isOpen: false));
   }
 
   void _observeOrderNotifications(List<WorkOrder> orders) {
@@ -1423,6 +1564,7 @@ class _IsdpShellState extends State<IsdpShell> {
       '${order.id}:status:${order.status}';
 
   void _openCompletionDetails(WorkOrder order) {
+    _rememberNavigation();
     setState(() {
       _workflowView = _WorkflowView.completionDetails;
       _completionOrder = order;
@@ -1453,10 +1595,60 @@ class _IsdpShellState extends State<IsdpShell> {
     await _approveOrder(order);
     if (!mounted) return;
     if (returnToQueue) {
-      _openReviewQueueScreen();
+      _navigateBack();
     } else {
       _closeWorkflow();
     }
+  }
+
+  void _openDeclineScreen(WorkOrder order) {
+    _rememberNavigation();
+    setState(() {
+      _reviewingOrder = order;
+      _workflowView = _WorkflowView.declineJob;
+      _tab = 0;
+    });
+  }
+
+  void _openReviewAfterDeclineCancel() {
+    _navigateBack();
+  }
+
+  Future<void> _completeDecline(DeclineDecision decision) async {
+    final order = _reviewingOrder;
+    if (order == null) return;
+    final status = decision.allowResubmission
+        ? 'Declined'
+        : 'Declined - Closed';
+    final declined = order.copyWith(
+      status: status,
+      declineReason: decision.reason,
+      declinedAt: DateTime.now(),
+      closedAt: decision.allowResubmission ? null : DateTime.now(),
+      reviewed: true,
+      isOpen: decision.allowResubmission,
+    );
+    await _repository.declineWorkOrder(
+      order,
+      decision.reason,
+      allowResubmission: decision.allowResubmission,
+    );
+    _replaceOrder(declined);
+    if (!mounted) return;
+    if (_returnToReviewQueue) {
+      _navigateBack();
+    } else {
+      _closeWorkflow();
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          decision.allowResubmission
+              ? '${order.id} declined and returned.'
+              : '${order.id} declined and closed.',
+        ),
+      ),
+    );
   }
 }
 
@@ -1532,6 +1724,36 @@ class _NotificationButton extends StatelessWidget {
       ),
     );
   }
+}
+
+class _NavigationSnapshot {
+  const _NavigationSnapshot({
+    required this.tab,
+    required this.workflowView,
+    required this.selectedOrderId,
+    required this.assigningOrder,
+    required this.scanningOrder,
+    required this.uploadingOrder,
+    required this.uploadingEvidenceSlot,
+    required this.completionOrder,
+    required this.reviewingOrder,
+    required this.supervisorOrder,
+    required this.adminOrder,
+    required this.returnToReviewQueue,
+  });
+
+  final int tab;
+  final _WorkflowView? workflowView;
+  final String? selectedOrderId;
+  final WorkOrder? assigningOrder;
+  final WorkOrder? scanningOrder;
+  final WorkOrder? uploadingOrder;
+  final String? uploadingEvidenceSlot;
+  final WorkOrder? completionOrder;
+  final WorkOrder? reviewingOrder;
+  final WorkOrder? supervisorOrder;
+  final WorkOrder? adminOrder;
+  final bool returnToReviewQueue;
 }
 
 enum _NotificationType { assignment, action, issue, progress, success, info }

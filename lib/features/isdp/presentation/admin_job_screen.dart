@@ -10,6 +10,7 @@ class AdminJobScreen extends StatelessWidget {
     super.key,
     required this.order,
     required this.onSendQr,
+    required this.onReview,
     required this.onOpenChat,
     required this.unreadChatStream,
     required this.onDelete,
@@ -18,6 +19,7 @@ class AdminJobScreen extends StatelessWidget {
 
   final WorkOrder order;
   final VoidCallback onSendQr;
+  final VoidCallback onReview;
   final VoidCallback onOpenChat;
   final Stream<int> unreadChatStream;
   final VoidCallback onDelete;
@@ -63,6 +65,7 @@ class AdminJobScreen extends StatelessWidget {
           onOpenChat: onOpenChat,
           unreadChatStream: unreadChatStream,
           onSendQr: onSendQr,
+          onReview: order.status == 'Submitted' ? onReview : null,
         ),
         const SizedBox(height: 14),
         WorkDurationPanel(order: order),
@@ -93,11 +96,13 @@ class _AdminActionPanel extends StatelessWidget {
     required this.onOpenChat,
     required this.unreadChatStream,
     required this.onSendQr,
+    this.onReview,
   });
 
   final VoidCallback onOpenChat;
   final Stream<int> unreadChatStream;
   final VoidCallback onSendQr;
+  final VoidCallback? onReview;
 
   @override
   Widget build(BuildContext context) {
@@ -117,11 +122,30 @@ class _AdminActionPanel extends StatelessWidget {
               icon: const Icon(Icons.picture_as_pdf_outlined),
               label: const Text('Generate QR PDF'),
             );
+            final reviewButton = FilledButton.icon(
+              onPressed: onReview,
+              icon: const Icon(Icons.fact_check_outlined),
+              label: const Text('Review Job'),
+            );
+
+            final buttons = [
+              chatButton,
+              if (onReview != null) reviewButton else qrButton,
+            ];
 
             if (compact) {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [chatButton, const SizedBox(height: 10), qrButton],
+                children: [
+                  for (var index = 0; index < buttons.length; index++) ...[
+                    if (index > 0) const SizedBox(height: 10),
+                    buttons[index],
+                  ],
+                  if (onReview != null) ...[
+                    const SizedBox(height: 10),
+                    qrButton,
+                  ],
+                ],
               );
             }
 
@@ -129,6 +153,10 @@ class _AdminActionPanel extends StatelessWidget {
               children: [
                 Expanded(child: chatButton),
                 const SizedBox(width: 10),
+                if (onReview != null) ...[
+                  Expanded(child: reviewButton),
+                  const SizedBox(width: 10),
+                ],
                 Expanded(child: qrButton),
               ],
             );

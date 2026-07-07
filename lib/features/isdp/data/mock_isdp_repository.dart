@@ -55,6 +55,16 @@ class MockIsdpRepository implements IsdpRepository {
   Future<void> approveWorkOrder(WorkOrder order) async {}
 
   @override
+  Future<void> declineWorkOrder(
+    WorkOrder order,
+    String reason, {
+    required bool allowResubmission,
+  }) async {}
+
+  @override
+  Future<void> closeWorkOrder(WorkOrder order) async {}
+
+  @override
   Future<void> deleteWorkOrder(WorkOrder order) async {}
 
   @override

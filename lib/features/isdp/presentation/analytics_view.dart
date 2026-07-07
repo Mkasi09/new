@@ -48,8 +48,13 @@ class _AnalyticsViewState extends State<AnalyticsView> {
         .length;
     final allPersonRows = _personRows();
     final selectedRow = _selectedRow(allPersonRows);
+    final matchingPersonRows = allPersonRows
+        .where((row) => _matchesPersonRow(row, _query))
+        .toList();
     final personRows = selectedRow == null
-        ? allPersonRows.where((row) => _matchesPersonRow(row, _query)).toList()
+        ? _query.isEmpty
+              ? matchingPersonRows.take(5).toList()
+              : matchingPersonRows
         : allPersonRows;
 
     return AppScrollView(
@@ -149,7 +154,9 @@ class _AnalyticsViewState extends State<AnalyticsView> {
         name: entry.key,
         jobs: jobs,
         total: jobs.length,
-        open: jobs.where((job) => job.status != 'Approved').length,
+        open: jobs
+            .where((job) => job.status != 'Approved' && job.status != 'Closed')
+            .length,
         dispatched: jobs.where((job) => job.status == 'Dispatched').length,
         onSite: jobs.where((job) => job.status == 'On Site').length,
         submitted: jobs.where((job) => job.status == 'Submitted').length,

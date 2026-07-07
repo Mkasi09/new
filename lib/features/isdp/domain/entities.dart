@@ -34,6 +34,10 @@ class WorkOrder {
     this.dueAt,
     this.arrivedAt,
     this.submittedAt,
+    this.approvedAt,
+    this.declinedAt,
+    this.closedAt,
+    this.declineReason,
     this.arrivalVerified = false,
     this.evidenceUploaded = false,
     this.evidenceSlots = const [],
@@ -68,6 +72,10 @@ class WorkOrder {
   final DateTime? dueAt;
   final DateTime? arrivedAt;
   final DateTime? submittedAt;
+  final DateTime? approvedAt;
+  final DateTime? declinedAt;
+  final DateTime? closedAt;
+  final String? declineReason;
   final bool arrivalVerified;
   final bool evidenceUploaded;
   final List<String> evidenceSlots;
@@ -102,6 +110,10 @@ class WorkOrder {
     DateTime? dueAt,
     DateTime? arrivedAt,
     DateTime? submittedAt,
+    DateTime? approvedAt,
+    DateTime? declinedAt,
+    DateTime? closedAt,
+    String? declineReason,
     bool? arrivalVerified,
     bool? evidenceUploaded,
     List<String>? evidenceSlots,
@@ -136,6 +148,10 @@ class WorkOrder {
       dueAt: dueAt ?? this.dueAt,
       arrivedAt: arrivedAt ?? this.arrivedAt,
       submittedAt: submittedAt ?? this.submittedAt,
+      approvedAt: approvedAt ?? this.approvedAt,
+      declinedAt: declinedAt ?? this.declinedAt,
+      closedAt: closedAt ?? this.closedAt,
+      declineReason: declineReason ?? this.declineReason,
       arrivalVerified: arrivalVerified ?? this.arrivalVerified,
       evidenceUploaded: evidenceUploaded ?? this.evidenceUploaded,
       evidenceSlots: evidenceSlots ?? this.evidenceSlots,
@@ -192,6 +208,10 @@ class WorkOrder {
       'dueAt': dueAt?.toIso8601String(),
       'arrivedAt': arrivedAt?.toIso8601String(),
       'submittedAt': submittedAt?.toIso8601String(),
+      'approvedAt': approvedAt?.toIso8601String(),
+      'declinedAt': declinedAt?.toIso8601String(),
+      'closedAt': closedAt?.toIso8601String(),
+      'declineReason': declineReason,
       'arrivalVerified': arrivalVerified,
       'evidenceUploaded': evidenceUploaded,
       'evidenceSlots': evidenceSlots,
@@ -231,6 +251,10 @@ class WorkOrder {
           _dueAtFromFriendlyText(map['sla'] as String?),
       arrivedAt: _dateTimeFromMapValue(map['arrivedAt']),
       submittedAt: _dateTimeFromMapValue(map['submittedAt']),
+      approvedAt: _dateTimeFromMapValue(map['approvedAt']),
+      declinedAt: _dateTimeFromMapValue(map['declinedAt']),
+      closedAt: _dateTimeFromMapValue(map['closedAt']),
+      declineReason: map['declineReason'] as String?,
       arrivalVerified: map['arrivalVerified'] as bool? ?? false,
       evidenceUploaded: map['evidenceUploaded'] as bool? ?? false,
       evidenceSlots:

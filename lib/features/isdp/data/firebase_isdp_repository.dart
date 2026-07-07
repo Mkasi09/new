@@ -25,53 +25,121 @@ class FirebaseIsdpRepository implements IsdpRepository {
   CollectionReference<Map<String, dynamic>> get _workOrders =>
       _firestore.collection('work_orders');
 
-  late final Query<Map<String, dynamic>> _visibleWorkOrders = switch (role) {
-    AppRole.admin =>
-      _workOrders
-          .where(
-            'createdAt',
-            isGreaterThanOrEqualTo: Timestamp.fromDate(
-              DateTime.now().subtract(const Duration(days: 45)),
-            ),
-          )
-          .orderBy('createdAt', descending: true),
-    AppRole.technician =>
-      _workOrders
-          .where('assignedTechnicianIds', arrayContains: userId)
-          .where('isOpen', isEqualTo: true)
-          .orderBy('createdAt', descending: true),
-    AppRole.supervisor =>
-      _workOrders
-          .where('isOpen', isEqualTo: true)
-          .orderBy('createdAt', descending: true),
-  };
+  late final List<Query<Map<String, dynamic>>> _visibleWorkOrderQueries =
+      _buildVisibleWorkOrderQueries();
 
-  late final Stream<QuerySnapshot<Map<String, dynamic>>> _visibleSnapshots =
-      _visibleWorkOrders
-          .snapshots(includeMetadataChanges: true)
-          .asBroadcastStream();
+  late final Stream<List<QuerySnapshot<Map<String, dynamic>>>>
+  _visibleSnapshots = _combineQuerySnapshots(
+    _visibleWorkOrderQueries,
+  ).asBroadcastStream();
 
   String get _uid => _firebaseAuth.currentUser?.uid ?? 'system';
+
+  List<Query<Map<String, dynamic>>> _buildVisibleWorkOrderQueries() {
+    final approvalCutoff = Timestamp.fromDate(
+      DateTime.now().subtract(const Duration(days: 14)),
+    );
+    return switch (role) {
+      AppRole.admin => [_workOrders.orderBy('createdAt', descending: true)],
+      AppRole.supervisor => [
+        _workOrders
+            .where('supervisorId', isNull: true)
+            .where('isOpen', isEqualTo: true),
+        _workOrders
+            .where('supervisorId', isEqualTo: userId)
+            .where('isOpen', isEqualTo: true),
+        _workOrders
+            .where('supervisorId', isEqualTo: userId)
+            .where('isOpen', isEqualTo: false)
+            .where('approvedAt', isGreaterThanOrEqualTo: approvalCutoff),
+        _workOrders
+            .where('supervisorId', isEqualTo: userId)
+            .where('isOpen', isEqualTo: false)
+            .where('closedAt', isGreaterThanOrEqualTo: approvalCutoff),
+      ],
+      AppRole.technician => [
+        _workOrders
+            .where('assignedTechnicianIds', arrayContains: userId)
+            .where('isOpen', isEqualTo: true),
+        _workOrders
+            .where('assignedTechnicianIds', arrayContains: userId)
+            .where('isOpen', isEqualTo: false)
+            .where('approvedAt', isGreaterThanOrEqualTo: approvalCutoff),
+        _workOrders
+            .where('assignedTechnicianIds', arrayContains: userId)
+            .where('isOpen', isEqualTo: false)
+            .where('closedAt', isGreaterThanOrEqualTo: approvalCutoff),
+      ],
+    };
+  }
+
+  Stream<List<QuerySnapshot<Map<String, dynamic>>>> _combineQuerySnapshots(
+    List<Query<Map<String, dynamic>>> queries,
+  ) {
+    late final StreamController<List<QuerySnapshot<Map<String, dynamic>>>>
+    controller;
+    final latest = <int, QuerySnapshot<Map<String, dynamic>>>{};
+    final subscriptions =
+        <StreamSubscription<QuerySnapshot<Map<String, dynamic>>>>[];
+
+    controller = StreamController<List<QuerySnapshot<Map<String, dynamic>>>>(
+      onListen: () {
+        for (var index = 0; index < queries.length; index++) {
+          subscriptions.add(
+            queries[index].snapshots(includeMetadataChanges: true).listen((
+              snapshot,
+            ) {
+              latest[index] = snapshot;
+              if (latest.length == queries.length) {
+                controller.add([
+                  for (var i = 0; i < queries.length; i++) latest[i]!,
+                ]);
+              }
+            }, onError: controller.addError),
+          );
+        }
+      },
+      onCancel: () async {
+        for (final subscription in subscriptions) {
+          await subscription.cancel();
+        }
+      },
+    );
+    return controller.stream;
+  }
 
   @override
   List<WorkOrder> getWorkOrders() => const [];
 
   @override
   Stream<List<WorkOrder>> watchWorkOrders() {
-    return _visibleSnapshots.map(
-      (snapshot) => snapshot.docs
+    return _visibleSnapshots.map((snapshots) {
+      final documents = <String, QueryDocumentSnapshot<Map<String, dynamic>>>{
+        for (final snapshot in snapshots)
+          for (final document in snapshot.docs) document.id: document,
+      };
+      final orders = documents.values
           .map((doc) => WorkOrder.fromMap(doc.id, doc.data()))
-          .toList(),
-    );
+          .toList();
+      orders.sort((a, b) {
+        final aDate = a.approvedAt ?? a.submittedAt ?? a.dueAt;
+        final bDate = b.approvedAt ?? b.submittedAt ?? b.dueAt;
+        if (aDate == null || bDate == null) return 0;
+        return bDate.compareTo(aDate);
+      });
+      return orders;
+    });
   }
 
   @override
   Stream<SyncStatus> watchSyncStatus() {
-    return _visibleSnapshots.map((snapshot) {
-      if (snapshot.docs.any((doc) => doc.metadata.hasPendingWrites)) {
+    return _visibleSnapshots.map((snapshots) {
+      if (snapshots.any(
+        (snapshot) => snapshot.docs.any((doc) => doc.metadata.hasPendingWrites),
+      )) {
         return SyncStatus.syncing;
       }
-      return snapshot.metadata.isFromCache
+      return snapshots.any((snapshot) => snapshot.metadata.isFromCache)
           ? SyncStatus.offline
           : SyncStatus.online;
     }).distinct();
@@ -187,6 +255,8 @@ class FirebaseIsdpRepository implements IsdpRepository {
       'submittedAt': FieldValue.serverTimestamp(),
       'reviewed': false,
       'reviewedAt': null,
+      'declineReason': null,
+      'declinedAt': null,
       'updatedAt': FieldValue.serverTimestamp(),
       'history': FieldValue.arrayUnion([_historyEntry('submitted')]),
     });
@@ -204,7 +274,43 @@ class FirebaseIsdpRepository implements IsdpRepository {
 
   @override
   Future<void> approveWorkOrder(WorkOrder order) {
-    return _updateStatus(order, 'Approved', sla: 'Approved');
+    return _updateStatus(
+      order,
+      'Approved',
+      sla: 'Approved',
+      recordApproval: true,
+    );
+  }
+
+  @override
+  Future<void> declineWorkOrder(
+    WorkOrder order,
+    String reason, {
+    required bool allowResubmission,
+  }) {
+    return _workOrders.doc(order.id).update({
+      'status': allowResubmission ? 'Declined' : 'Declined - Closed',
+      'declineReason': reason.trim(),
+      'declinedAt': FieldValue.serverTimestamp(),
+      'closedAt': allowResubmission ? null : FieldValue.serverTimestamp(),
+      'reviewed': true,
+      'isOpen': allowResubmission,
+      'updatedAt': FieldValue.serverTimestamp(),
+      'history': FieldValue.arrayUnion([_historyEntry('declined by admin')]),
+    });
+  }
+
+  @override
+  Future<void> closeWorkOrder(WorkOrder order) {
+    return _workOrders.doc(order.id).update({
+      'status': 'Closed',
+      'isOpen': false,
+      'closedAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+      'history': FieldValue.arrayUnion([
+        _historyEntry('closed by technician after decline'),
+      ]),
+    });
   }
 
   @override
@@ -326,7 +432,12 @@ class FirebaseIsdpRepository implements IsdpRepository {
     await batch.commit();
   }
 
-  Future<void> _updateStatus(WorkOrder order, String status, {String? sla}) {
+  Future<void> _updateStatus(
+    WorkOrder order,
+    String status, {
+    String? sla,
+    bool recordApproval = false,
+  }) {
     final update = <String, Object?>{
       'status': status,
       'isOpen': status != 'Approved',
@@ -334,6 +445,7 @@ class FirebaseIsdpRepository implements IsdpRepository {
       'history': FieldValue.arrayUnion([_historyEntry(status.toLowerCase())]),
     };
     if (sla != null) update['sla'] = sla;
+    if (recordApproval) update['approvedAt'] = FieldValue.serverTimestamp();
     return _workOrders.doc(order.id).update(update);
   }
 

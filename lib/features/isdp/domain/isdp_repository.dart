@@ -37,6 +37,14 @@ abstract class IsdpRepository {
 
   Future<void> approveWorkOrder(WorkOrder order);
 
+  Future<void> declineWorkOrder(
+    WorkOrder order,
+    String reason, {
+    required bool allowResubmission,
+  });
+
+  Future<void> closeWorkOrder(WorkOrder order);
+
   Future<void> deleteWorkOrder(WorkOrder order);
 
   Stream<List<JobChatMessage>> watchJobMessages(String workOrderId);

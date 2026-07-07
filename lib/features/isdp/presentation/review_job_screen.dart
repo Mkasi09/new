@@ -10,11 +10,13 @@ class ReviewJobScreen extends StatelessWidget {
     super.key,
     required this.order,
     required this.onApprove,
+    required this.onDecline,
     required this.onClose,
   });
 
   final WorkOrder order;
   final VoidCallback onApprove;
+  final VoidCallback onDecline;
   final VoidCallback onClose;
 
   @override
@@ -70,10 +72,24 @@ class ReviewJobScreen extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 18),
-        FilledButton.icon(
-          onPressed: evidenceReady ? onApprove : null,
-          icon: const Icon(Icons.verified_outlined),
-          label: const Text('Approve Job'),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: onDecline,
+                icon: const Icon(Icons.cancel_outlined),
+                label: const Text('Decline'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: evidenceReady ? onApprove : null,
+                icon: const Icon(Icons.verified_outlined),
+                label: const Text('Approve Job'),
+              ),
+            ),
+          ],
         ),
       ],
     );

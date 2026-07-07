@@ -33,10 +33,7 @@ class _WorkOrdersViewState extends State<WorkOrdersView> {
 
   @override
   Widget build(BuildContext context) {
-    final activeJobs = widget.workOrders
-        .where((order) => order.status != 'Approved')
-        .toList();
-    final filtered = activeJobs.where(_matchesFilters).toList();
+    final filtered = widget.workOrders.where(_matchesFilters).toList();
 
     return AppScrollView(
       children: [
@@ -92,6 +89,15 @@ class _WorkOrdersViewState extends State<WorkOrdersView> {
                       value: 'Submitted',
                       child: Text('Submitted'),
                     ),
+                    DropdownMenuItem(
+                      value: 'Declined',
+                      child: Text('Declined'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'Approved',
+                      child: Text('Approved (last 14 days)'),
+                    ),
+                    DropdownMenuItem(value: 'Closed', child: Text('Closed')),
                   ],
                   onChanged: (value) {
                     if (value != null) setState(() => _filter = value);
@@ -124,7 +130,7 @@ class _WorkOrdersViewState extends State<WorkOrdersView> {
           const Card(
             child: Padding(
               padding: EdgeInsets.all(18),
-              child: Text('No active jobs match the current filters.'),
+              child: Text('No jobs match the current filters.'),
             ),
           )
         else
@@ -139,7 +145,13 @@ class _WorkOrdersViewState extends State<WorkOrdersView> {
   }
 
   bool _matchesFilters(WorkOrder order) {
-    final matchesStatus = _filter == 'All' || order.status == _filter;
+    final matchesStatus = _filter == 'All'
+        ? order.status != 'Approved' &&
+              order.status != 'Closed' &&
+              order.status != 'Declined - Closed'
+        : _filter == 'Closed'
+        ? order.status == 'Closed' || order.status == 'Declined - Closed'
+        : order.status == _filter;
     if (!matchesStatus) return false;
 
     final query = _query.toLowerCase();

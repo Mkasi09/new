@@ -19,6 +19,7 @@ class DashboardView extends StatefulWidget {
     required this.onCreateJob,
     required this.onOpenAnalytics,
     required this.onOpenReviewQueue,
+    this.onOpenBilling,
     this.onAddUser,
     required this.onOpenTeamQueue,
     required this.onOpenSupervisorJob,
@@ -29,6 +30,7 @@ class DashboardView extends StatefulWidget {
     required this.onUploadEvidence,
     required this.onOpenCompletionDetails,
     required this.onSubmitCompletion,
+    required this.onCloseDeclinedJob,
     required this.onOpenJobChat,
     required this.onOpenJobChats,
   });
@@ -43,6 +45,7 @@ class DashboardView extends StatefulWidget {
   final VoidCallback onCreateJob;
   final VoidCallback onOpenAnalytics;
   final VoidCallback onOpenReviewQueue;
+  final VoidCallback? onOpenBilling;
   final VoidCallback? onAddUser;
   final VoidCallback onOpenTeamQueue;
   final ValueChanged<WorkOrder> onOpenSupervisorJob;
@@ -53,6 +56,7 @@ class DashboardView extends StatefulWidget {
   final Future<List<String>?> Function(WorkOrder, String?) onUploadEvidence;
   final ValueChanged<WorkOrder> onOpenCompletionDetails;
   final Future<void> Function(WorkOrder) onSubmitCompletion;
+  final Future<void> Function(WorkOrder) onCloseDeclinedJob;
   final ValueChanged<WorkOrder> onOpenJobChat;
   final VoidCallback onOpenJobChats;
 
@@ -101,6 +105,7 @@ class _DashboardViewState extends State<DashboardView> {
         onCreateJob: widget.onCreateJob,
         onOpenAnalytics: widget.onOpenAnalytics,
         onOpenReviewQueue: widget.onOpenReviewQueue,
+        onOpenBilling: widget.onOpenBilling,
         onAddUser: widget.onAddUser,
         onOpenReviewOrder: widget.onOpenReviewOrder,
         onOpenJobChat: widget.onOpenJobChat,
@@ -130,6 +135,7 @@ class _DashboardViewState extends State<DashboardView> {
         onOpenOrder: widget.onOpenOrder,
         onOpenCompletionDetails: widget.onOpenCompletionDetails,
         onSubmitCompletion: widget.onSubmitCompletion,
+        onCloseDeclinedJob: widget.onCloseDeclinedJob,
         onOpenJobChat: widget.onOpenJobChat,
         repository: widget.repository,
       ),
@@ -189,7 +195,10 @@ class _DashboardViewState extends State<DashboardView> {
   int _pendingTechnicianJobs(List<WorkOrder> orders) {
     return orders
         .where(
-          (order) => order.status != 'Submitted' && order.status != 'Approved',
+          (order) =>
+              order.status != 'Submitted' &&
+              order.status != 'Approved' &&
+              order.status != 'Closed',
         )
         .length;
   }
@@ -202,6 +211,7 @@ class _AdminHome extends StatelessWidget {
     required this.onCreateJob,
     required this.onOpenAnalytics,
     required this.onOpenReviewQueue,
+    this.onOpenBilling,
     this.onAddUser,
     required this.onOpenReviewOrder,
     required this.onOpenJobChat,
@@ -214,6 +224,7 @@ class _AdminHome extends StatelessWidget {
   final VoidCallback onCreateJob;
   final VoidCallback onOpenAnalytics;
   final VoidCallback onOpenReviewQueue;
+  final VoidCallback? onOpenBilling;
   final VoidCallback? onAddUser;
   final ValueChanged<WorkOrder> onOpenReviewOrder;
   final ValueChanged<WorkOrder> onOpenJobChat;
@@ -224,12 +235,16 @@ class _AdminHome extends StatelessWidget {
   Widget build(BuildContext context) {
     final inProgress = workOrders
         .where(
-          (order) => order.status != 'Submitted' && order.status != 'Approved',
+          (order) =>
+              order.status != 'Submitted' &&
+              order.status != 'Approved' &&
+              order.status != 'Closed',
         )
         .length;
     final approvalQueue = workOrders
         .where((order) => order.status == 'Submitted')
         .toList();
+    final nextApproval = approvalQueue.isEmpty ? null : approvalQueue.first;
     final unreviewed = approvalQueue.where((order) => !order.reviewed).length;
 
     return AppScrollView(
@@ -276,6 +291,12 @@ class _AdminHome extends StatelessWidget {
               badgeCount: unreviewed,
             ),
             _RoleAction(Icons.analytics_outlined, 'Analytics', onOpenAnalytics),
+            if (onOpenBilling != null)
+              _RoleAction(
+                Icons.receipt_long_outlined,
+                'Billing',
+                onOpenBilling!,
+              ),
             _RoleAction(
               Icons.forum_outlined,
               'Job Chats',
@@ -295,7 +316,7 @@ class _AdminHome extends StatelessWidget {
         const SizedBox(height: 18),
         const SectionTitle('Needs Approval'),
         const SizedBox(height: 10),
-        if (approvalQueue.isEmpty)
+        if (nextApproval == null)
           const _EmptyRoleCard(
             icon: Icons.verified_outlined,
             title: 'No jobs waiting',
@@ -303,12 +324,10 @@ class _AdminHome extends StatelessWidget {
                 'Submitted completion packs from technicians will appear here.',
           )
         else
-          ...approvalQueue.map(
-            (order) => _ApprovalCard(
-              order: order,
-              onTap: () => onOpenOrder(order),
-              onReview: () => onOpenReviewOrder(order),
-            ),
+          _ApprovalCard(
+            order: nextApproval,
+            onTap: () => onOpenOrder(nextApproval),
+            onReview: () => onOpenReviewOrder(nextApproval),
           ),
       ],
     );
@@ -338,7 +357,9 @@ class _SupervisorHome extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final activeJobs = workOrders.where((order) => order.status != 'Approved');
+    final activeJobs = workOrders.where(
+      (order) => order.status != 'Approved' && order.status != 'Closed',
+    );
     final awaitingAcceptance = selectedOrder.status == 'Assigned to Supervisor';
 
     return AppScrollView(
@@ -481,6 +502,7 @@ class _TechnicianHome extends StatelessWidget {
     required this.onOpenOrder,
     required this.onOpenCompletionDetails,
     required this.onSubmitCompletion,
+    required this.onCloseDeclinedJob,
     required this.onOpenJobChat,
     required this.repository,
   });
@@ -497,12 +519,17 @@ class _TechnicianHome extends StatelessWidget {
   final ValueChanged<WorkOrder> onOpenOrder;
   final ValueChanged<WorkOrder> onOpenCompletionDetails;
   final Future<void> Function(WorkOrder) onSubmitCompletion;
+  final Future<void> Function(WorkOrder) onCloseDeclinedJob;
   final ValueChanged<WorkOrder> onOpenJobChat;
   final IsdpRepository repository;
 
   @override
   Widget build(BuildContext context) {
-    final submitted = order.status == 'Submitted' || order.status == 'Approved';
+    final finalDecline = order.status == 'Declined - Closed';
+    final submitted =
+        order.status == 'Submitted' ||
+        order.status == 'Approved' ||
+        finalDecline;
     final beforeUploaded = evidenceSlots.contains('before');
     final afterUploaded = evidenceSlots.contains('after');
     final completionReady =
@@ -525,6 +552,49 @@ class _TechnicianHome extends StatelessWidget {
           progress: progress,
           arrivalVerified: arrivalVerified,
         ),
+        if (order.status == 'Declined' || finalDecline) ...[
+          const SizedBox(height: 12),
+          Card(
+            color: AppTheme.danger.withValues(alpha: 0.08),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    finalDecline ? 'Job declined and closed' : 'Job declined',
+                    style: const TextStyle(
+                      color: AppTheme.danger,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    order.declineReason?.trim().isNotEmpty == true
+                        ? order.declineReason!
+                        : 'No reason was provided.',
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    finalDecline
+                        ? 'This decision is final. The job cannot be resubmitted.'
+                        : 'Correct the evidence or completion details and resubmit, or close the job.',
+                    style: const TextStyle(color: AppTheme.muted),
+                  ),
+                  if (!finalDecline) ...[
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: () => onCloseDeclinedJob(order),
+                      icon: const Icon(Icons.close),
+                      label: const Text('Close Job'),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: 12),
         _TodayActionPanel(
           progress: progress,
@@ -1030,7 +1100,7 @@ class _MetricStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final columns = constraints.maxWidth >= 360 ? metrics.length : 1;
+        final columns = metrics.length;
         final spacing = 10.0;
         final tileWidth =
             (constraints.maxWidth - (spacing * (columns - 1))) / columns;

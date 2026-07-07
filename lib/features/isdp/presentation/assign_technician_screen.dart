@@ -12,12 +12,15 @@ class AssignTechnicianScreen extends StatefulWidget {
     super.key,
     required this.order,
     this.technicians = const [],
+    this.onTechniciansAssigned,
     this.onAssigned,
     this.onCancel,
   });
 
   final WorkOrder order;
   final List<AppUserProfile> technicians;
+  final ValueChanged<List<AppUserProfile>>? onTechniciansAssigned;
+  @Deprecated('Use onTechniciansAssigned so assignments retain user IDs.')
   final ValueChanged<List<String>>? onAssigned;
   final VoidCallback? onCancel;
 
@@ -27,7 +30,7 @@ class AssignTechnicianScreen extends StatefulWidget {
 
 class _AssignTechnicianScreenState extends State<AssignTechnicianScreen> {
   late final TextEditingController _searchController;
-  late final Set<String> _selectedNames;
+  late final Set<String> _selectedIds;
 
   List<AppUserProfile> get _technicians => widget.technicians
       .where((user) => user.role == AppRole.technician)
@@ -37,7 +40,13 @@ class _AssignTechnicianScreenState extends State<AssignTechnicianScreen> {
   void initState() {
     super.initState();
     _searchController = TextEditingController();
-    _selectedNames = {...widget.order.technicianNames};
+    final assignedNames = widget.order.technicianNames.toSet();
+    _selectedIds = {
+      ...widget.order.assignedTechnicianIds,
+      ..._technicians
+          .where((technician) => assignedNames.contains(technician.name))
+          .map((technician) => technician.uid),
+    };
   }
 
   @override
@@ -50,7 +59,7 @@ class _AssignTechnicianScreenState extends State<AssignTechnicianScreen> {
   Widget build(BuildContext context) {
     final query = _searchController.text.trim().toLowerCase();
     final filtered = query.isEmpty
-        ? _technicians
+        ? _technicians.take(5).toList()
         : _technicians.where((technician) {
             return [
               technician.name,
@@ -106,17 +115,23 @@ class _AssignTechnicianScreenState extends State<AssignTechnicianScreen> {
                               ),
                             ),
                             const SizedBox(height: 12),
-                            if (_selectedNames.isNotEmpty) ...[
+                            if (_selectedIds.isNotEmpty) ...[
                               Wrap(
                                 spacing: 8,
                                 runSpacing: 8,
-                                children: _selectedNames
+                                children: _technicians
+                                    .where(
+                                      (technician) =>
+                                          _selectedIds.contains(technician.uid),
+                                    )
                                     .map(
-                                      (name) => InputChip(
+                                      (technician) => InputChip(
                                         avatar: const Icon(Icons.person),
-                                        label: Text(name),
+                                        label: Text(technician.name),
                                         onDeleted: () => setState(
-                                          () => _selectedNames.remove(name),
+                                          () => _selectedIds.remove(
+                                            technician.uid,
+                                          ),
                                         ),
                                       ),
                                     )
@@ -142,9 +157,9 @@ class _AssignTechnicianScreenState extends State<AssignTechnicianScreen> {
         ),
         FormActionBar(
           primaryIcon: Icons.person_add_alt,
-          primaryLabel: _selectedNames.length == 1
+          primaryLabel: _selectedIds.length == 1
               ? 'Assign Job'
-              : 'Assign ${_selectedNames.length}',
+              : 'Assign ${_selectedIds.length}',
           onPrimary: _submit,
           onCancel: widget.onCancel,
         ),
@@ -153,15 +168,15 @@ class _AssignTechnicianScreenState extends State<AssignTechnicianScreen> {
   }
 
   Widget _technicianTile(AppUserProfile technician) {
-    final selected = _selectedNames.contains(technician.name);
+    final selected = _selectedIds.contains(technician.uid);
     return CheckboxListTile(
       contentPadding: EdgeInsets.zero,
       value: selected,
       onChanged: (_) => setState(() {
         if (selected) {
-          _selectedNames.remove(technician.name);
+          _selectedIds.remove(technician.uid);
         } else {
-          _selectedNames.add(technician.name);
+          _selectedIds.add(technician.uid);
         }
       }),
       secondary: CircleAvatar(
@@ -185,21 +200,28 @@ class _AssignTechnicianScreenState extends State<AssignTechnicianScreen> {
   }
 
   void _submit() {
-    final allowedNames = _technicians
-        .map((technician) => technician.name)
-        .toSet();
-    final names = _selectedNames.where(allowedNames.contains).toList()..sort();
-    if (names.isEmpty) {
+    final selectedTechnicians =
+        _technicians
+            .where((technician) => _selectedIds.contains(technician.uid))
+            .toList()
+          ..sort(
+            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+          );
+    if (selectedTechnicians.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select an existing technician.')),
       );
       return;
     }
-    final onAssigned = widget.onAssigned;
-    if (onAssigned != null) {
-      onAssigned(names);
+    final onTechniciansAssigned = widget.onTechniciansAssigned;
+    if (onTechniciansAssigned != null) {
+      onTechniciansAssigned(selectedTechnicians);
+    } else if (widget.onAssigned != null) {
+      widget.onAssigned!(
+        selectedTechnicians.map((technician) => technician.name).toList(),
+      );
     } else {
-      Navigator.pop(context, names);
+      Navigator.pop(context, selectedTechnicians);
     }
   }
 }

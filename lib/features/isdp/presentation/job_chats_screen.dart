@@ -22,7 +22,11 @@ class JobChatsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final activeOrders =
-        orders.where((order) => order.status != 'Approved').toList()
+        orders
+            .where(
+              (order) => order.status != 'Approved' && order.status != 'Closed',
+            )
+            .toList()
           ..sort(_compareChatActivity);
 
     return AppScrollView(
