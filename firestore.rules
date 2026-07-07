@@ -78,5 +78,21 @@ service cloud.firestore {
       allow read, create, update: if isAdmin();
       allow delete: if false;
     }
+
+    match /support_messages/{messageId} {
+      allow read: if signedIn() &&
+        (isAdmin() || resource.data.senderId == request.auth.uid);
+      allow create: if signedIn() &&
+        request.resource.data.senderId == request.auth.uid &&
+        request.resource.data.source == 'support' &&
+        request.resource.data.status == 'new' &&
+        request.resource.data.message is string &&
+        request.resource.data.message.size() > 0 &&
+        request.resource.data.message.size() <= 2000;
+      allow update: if isAdmin() &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'readAt']);
+      allow delete: if false;
+    }
   }
 }

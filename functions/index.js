@@ -182,6 +182,46 @@ exports.notifyJobChatMessage = onDocumentCreated(
   },
 );
 
+exports.notifySupportMessage = onDocumentCreated(
+  {
+    document: "support_messages/{messageId}",
+    secrets: huaweiSecrets,
+  },
+  async (event) => {
+    const message = event.data?.data();
+    if (!message) return;
+
+    const db = getFirestore();
+    const senderId = cleanString(message.senderId);
+    const senderName = cleanString(message.senderName) || "ISDP User";
+    const text = cleanString(message.message);
+    if (!text) return;
+
+    const recipients = (await usersForAudience(db, "admins", {}))
+      .filter((doc) => doc.id !== senderId);
+    const tokens = tokensForUsers(recipients);
+    console.log("notifySupportMessage", {
+      messageId: event.params.messageId,
+      recipients: recipients.length,
+      fcmTokens: tokens.fcm.length,
+      hmsTokens: tokens.hms.length,
+    });
+    if (tokens.fcm.length === 0 && tokens.hms.length === 0) return;
+
+    await sendToTokens(tokens, {
+      notification: {
+        title: "New support message",
+        body: `${senderName}: ${text.slice(0, 120)}`,
+      },
+      data: {
+        messageId: event.params.messageId,
+        type: "support_message",
+        source: "support",
+      },
+    });
+  },
+);
+
 function notificationForWorkOrder(orderId, before, after) {
   const site = cleanString(after.site) || "A work order";
   const status = cleanString(after.status);

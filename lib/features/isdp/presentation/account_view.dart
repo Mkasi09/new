@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../../../core/domain/app_role.dart';
 import '../../../core/notifications/notification_service.dart';
 import '../../../core/support/support_contact.dart';
 import '../../auth/domain/auth_repository.dart';
+import '../domain/isdp_repository.dart';
 import 'widgets/common.dart';
 
 class AccountView extends StatelessWidget {
@@ -15,11 +18,13 @@ class AccountView extends StatelessWidget {
     required this.role,
     this.userProfile,
     this.authRepository,
+    this.repository,
   });
 
   final AppRole role;
   final AppUserProfile? userProfile;
   final AuthRepository? authRepository;
+  final IsdpRepository? repository;
 
   @override
   Widget build(BuildContext context) {
@@ -61,16 +66,23 @@ class AccountView extends StatelessWidget {
             _SettingsItem(
               icon: Icons.support_agent_outlined,
               title: 'Support',
-              subtitle: supportContactNumber,
+              subtitle: supportContactEmail,
               color: AppTheme.secondary,
-              onTap: () => _open(context, const _SupportScreen()),
+              onTap: () => _open(
+                context,
+                _SupportScreen(
+                  repository: repository,
+                  userProfile: userProfile,
+                ),
+              ),
             ),
             _SettingsItem(
               icon: Icons.tune_outlined,
               title: 'App Settings',
               subtitle: 'Version and sync status',
               color: AppTheme.success,
-              onTap: () => _open(context, const _AppSettingsScreen()),
+              onTap: () =>
+                  _open(context, _AppSettingsScreen(repository: repository)),
             ),
           ],
         ),
@@ -865,23 +877,40 @@ class _NotificationSettingsScreenState
   }
 }
 
-class _SupportScreen extends StatelessWidget {
-  const _SupportScreen();
+class _SupportScreen extends StatefulWidget {
+  const _SupportScreen({required this.repository, required this.userProfile});
+
+  final IsdpRepository? repository;
+  final AppUserProfile? userProfile;
+
+  @override
+  State<_SupportScreen> createState() => _SupportScreenState();
+}
+
+class _SupportScreenState extends State<_SupportScreen> {
+  final _messageController = TextEditingController();
+  bool _sending = false;
+
+  @override
+  void dispose() {
+    _messageController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return const _SettingsScaffold(
+    return _SettingsScaffold(
       title: 'Support',
       icon: Icons.support_agent_outlined,
       subtitle: 'Get help with account access, submissions, and approvals.',
       children: [
-        _SectionCard(
+        const _SectionCard(
           title: 'Contact',
           children: [
             _InfoRow(
-              icon: Icons.phone_outlined,
-              title: 'Support Number',
-              subtitle: supportContactNumber,
+              icon: Icons.email_outlined,
+              title: 'Support Email',
+              subtitle: supportContactEmail,
             ),
             _InfoRow(
               icon: Icons.schedule_outlined,
@@ -890,8 +919,72 @@ class _SupportScreen extends StatelessWidget {
             ),
           ],
         ),
-        SizedBox(height: 12),
+        const SizedBox(height: 12),
+        const _SectionCard(
+          title: 'Frequently Asked Questions',
+          children: [
+            _FaqItem(
+              question: 'Why are my jobs not showing?',
+              answer:
+                  'Check your internet connection and reopen the Jobs screen. The app may show cached jobs while it reconnects. If the problem continues, send Admin a support message below.',
+            ),
+            _FaqItem(
+              question: 'Can I resubmit a rejected job?',
+              answer:
+                  'Yes. Open the rejected job, review the rejection reason, correct the required information, and resubmit it for approval.',
+            ),
+            _FaqItem(
+              question: 'What should I do if pictures will not upload?',
+              answer:
+                  'Confirm that the phone has internet access and that the app can access photos or the camera. Keep the app open while the upload completes.',
+            ),
+            _FaqItem(
+              question: 'How do I get an invoice PDF?',
+              answer:
+                  'Open the completed job invoice, review it in the app, then use the PDF download or share action.',
+            ),
+            _FaqItem(
+              question: 'How do I contact support?',
+              answer:
+                  'Send a message using Message Admin below, or email $supportContactEmail.',
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
         _SectionCard(
+          title: 'Message Admin',
+          children: [
+            TextField(
+              controller: _messageController,
+              minLines: 3,
+              maxLines: 6,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Support message',
+                hintText: 'Describe what you need help with',
+                prefixIcon: Icon(Icons.support_agent_outlined),
+              ),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _sending || widget.repository == null
+                    ? null
+                    : _sendMessage,
+                icon: Icon(_sending ? Icons.hourglass_empty : Icons.send),
+                label: const Text('Send to Admin'),
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Admins will see this in the Support Inbox marked as sent via support.',
+              style: TextStyle(color: AppTheme.muted, fontSize: 12),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        const _SectionCard(
           title: 'Help With',
           children: [
             _InfoRow(
@@ -914,35 +1007,119 @@ class _SupportScreen extends StatelessWidget {
       ],
     );
   }
+
+  Future<void> _sendMessage() async {
+    final text = _messageController.text.trim();
+    if (text.isEmpty || _sending || widget.repository == null) return;
+    setState(() => _sending = true);
+    try {
+      await widget.repository!.sendSupportMessage(
+        message: text,
+        senderName: widget.userProfile?.name ?? 'ISDP User',
+        senderRole: widget.userProfile?.role.label ?? 'User',
+        senderEmail: widget.userProfile?.email ?? '',
+      );
+      _messageController.clear();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Support message sent to Admin.')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not send support message. $supportContactMessage',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
 }
 
-class _AppSettingsScreen extends StatelessWidget {
-  const _AppSettingsScreen();
+class _AppSettingsScreen extends StatefulWidget {
+  const _AppSettingsScreen({required this.repository});
+
+  final IsdpRepository? repository;
+
+  @override
+  State<_AppSettingsScreen> createState() => _AppSettingsScreenState();
+}
+
+class _AppSettingsScreenState extends State<_AppSettingsScreen> {
+  late final Future<PackageInfo> _packageInfo = PackageInfo.fromPlatform();
+  bool _clearingJobs = false;
+  bool _clearingPictures = false;
+  bool _clearingDeviceData = false;
 
   @override
   Widget build(BuildContext context) {
     return _SettingsScaffold(
       title: 'App Settings',
       icon: Icons.tune_outlined,
-      subtitle: 'Application details and cloud sync information.',
+      subtitle: 'Storage, cache, version, and app information.',
       children: [
-        const _SectionCard(
-          title: 'Application',
+        FutureBuilder<PackageInfo>(
+          future: _packageInfo,
+          builder: (context, snapshot) {
+            final packageInfo = snapshot.data;
+            final version = packageInfo == null
+                ? 'Loading...'
+                : '${packageInfo.version}+${packageInfo.buildNumber}';
+            return _SectionCard(
+              title: 'Application',
+              children: [
+                const _InfoRow(
+                  icon: Icons.apps_outlined,
+                  title: 'App',
+                  subtitle: 'PHEPHA MV ISDP',
+                ),
+                _InfoRow(
+                  icon: Icons.new_releases_outlined,
+                  title: 'Version',
+                  subtitle: version,
+                ),
+                const _InfoRow(
+                  icon: Icons.cloud_done_outlined,
+                  title: 'Sync',
+                  subtitle: 'Cloud sync enabled; local cache helps offline use',
+                ),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 12),
+        _SectionCard(
+          title: 'Storage',
           children: [
-            _InfoRow(
-              icon: Icons.apps_outlined,
-              title: 'App',
-              subtitle: 'PHEPHA MV ISDP',
+            _NavRow(
+              icon: Icons.assignment_outlined,
+              title: _clearingJobs
+                  ? 'Clearing job cache...'
+                  : 'Clear Job Cache',
+              subtitle:
+                  'Removes locally cached job list; cloud jobs remain safe',
+              onTap: _clearingJobs || widget.repository == null
+                  ? null
+                  : _clearJobCache,
             ),
-            _InfoRow(
-              icon: Icons.new_releases_outlined,
-              title: 'Version',
-              subtitle: '1.0.0',
+            _NavRow(
+              icon: Icons.photo_library_outlined,
+              title: _clearingPictures
+                  ? 'Clearing picture cache...'
+                  : 'Clear Picture Cache',
+              subtitle: 'Frees stored evidence image cache on this phone',
+              onTap: _clearingPictures ? null : _clearPictureCache,
             ),
-            _InfoRow(
-              icon: Icons.cloud_done_outlined,
-              title: 'Sync',
-              subtitle: 'Cloud sync enabled',
+            _NavRow(
+              icon: Icons.cleaning_services_outlined,
+              title: _clearingDeviceData
+                  ? 'Cleaning device data...'
+                  : 'Clear App Cache',
+              subtitle: 'Clears job and picture cache on this phone',
+              onTap: _clearingDeviceData ? null : _clearAppCache,
             ),
           ],
         ),
@@ -952,25 +1129,136 @@ class _AppSettingsScreen extends StatelessWidget {
             icon: Icons.info_outline,
             title: 'About',
             subtitle: 'View app information',
-            onTap: () => showAboutDialog(
-              context: context,
-              applicationName: 'PHEPHA MV ISDP',
-              applicationVersion: '1.0.0',
-              applicationIcon: Image.asset(
-                'assets/logo1.png',
-                width: 48,
-                height: 48,
-              ),
-              children: const [
-                Text(
-                  'Integrated Service Delivery Platform for field service workflows.',
+            onTap: () async {
+              final packageInfo = await _packageInfo;
+              if (!context.mounted) return;
+              showAboutDialog(
+                context: context,
+                applicationName: 'PHEPHA MV ISDP',
+                applicationVersion:
+                    '${packageInfo.version}+${packageInfo.buildNumber}',
+                applicationIcon: Image.asset(
+                  'assets/logo.png',
+                  width: 48,
+                  height: 48,
                 ),
-              ],
-            ),
+                children: const [
+                  Text(
+                    'Integrated Service Delivery Platform for field service workflows.',
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ],
     );
+  }
+
+  Future<void> _clearJobCache() async {
+    final confirmed = await _confirmCacheClear(
+      title: 'Clear job cache?',
+      message:
+          'Locally cached jobs will be removed from this phone. Your cloud jobs will not be deleted.',
+      confirmLabel: 'Clear Jobs',
+    );
+    if (!confirmed || !mounted) return;
+    setState(() => _clearingJobs = true);
+    try {
+      await widget.repository?.clearLocalCache();
+      if (!mounted) return;
+      _showSettingsSnackBar('Cached jobs cleared. Cloud data was not deleted.');
+    } catch (_) {
+      if (!mounted) return;
+      _showSettingsSnackBar(
+        'Could not clear job cache. $supportContactMessage',
+      );
+    } finally {
+      if (mounted) setState(() => _clearingJobs = false);
+    }
+  }
+
+  Future<void> _clearPictureCache() async {
+    final confirmed = await _confirmCacheClear(
+      title: 'Clear picture cache?',
+      message:
+          'Cached evidence pictures will be removed from this phone and downloaded again when needed.',
+      confirmLabel: 'Clear Pictures',
+    );
+    if (!confirmed || !mounted) return;
+    setState(() => _clearingPictures = true);
+    try {
+      await DefaultCacheManager().emptyCache();
+      PaintingBinding.instance.imageCache.clear();
+      PaintingBinding.instance.imageCache.clearLiveImages();
+      if (!mounted) return;
+      _showSettingsSnackBar('Cached pictures cleared.');
+    } catch (_) {
+      if (!mounted) return;
+      _showSettingsSnackBar(
+        'Could not clear picture cache. $supportContactMessage',
+      );
+    } finally {
+      if (mounted) setState(() => _clearingPictures = false);
+    }
+  }
+
+  Future<void> _clearAppCache() async {
+    final confirmed = await _confirmCacheClear(
+      title: 'Clear app cache?',
+      message:
+          'Cached jobs and pictures will be removed from this phone. Cloud data and submitted work will remain safe.',
+      confirmLabel: 'Clear Cache',
+    );
+    if (!confirmed || !mounted) return;
+    setState(() => _clearingDeviceData = true);
+    try {
+      await widget.repository?.clearLocalCache();
+      await DefaultCacheManager().emptyCache();
+      PaintingBinding.instance.imageCache.clear();
+      PaintingBinding.instance.imageCache.clearLiveImages();
+      if (!mounted) return;
+      _showSettingsSnackBar('App cache cleared on this device.');
+    } catch (_) {
+      if (!mounted) return;
+      _showSettingsSnackBar(
+        'Could not clear app cache. $supportContactMessage',
+      );
+    } finally {
+      if (mounted) setState(() => _clearingDeviceData = false);
+    }
+  }
+
+  void _showSettingsSnackBar(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<bool> _confirmCacheClear({
+    required String title,
+    required String message,
+    required String confirmLabel,
+  }) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            icon: const Icon(Icons.warning_amber_rounded),
+            title: Text(title),
+            content: Text(message),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: Text(confirmLabel),
+              ),
+            ],
+          ),
+        ) ??
+        false;
   }
 }
 
@@ -1042,6 +1330,32 @@ class _SettingsHeader extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _FaqItem extends StatelessWidget {
+  const _FaqItem({required this.question, required this.answer});
+
+  final String question;
+  final String answer;
+
+  @override
+  Widget build(BuildContext context) {
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: const EdgeInsets.only(bottom: 14),
+      leading: const Icon(Icons.help_outline, color: AppTheme.primary),
+      title: Text(
+        question,
+        style: const TextStyle(fontWeight: FontWeight.w700),
+      ),
+      children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Text(answer, style: const TextStyle(color: AppTheme.muted)),
+        ),
+      ],
     );
   }
 }

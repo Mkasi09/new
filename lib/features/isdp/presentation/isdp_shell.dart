@@ -30,6 +30,7 @@ import 'review_job_screen.dart';
 import 'review_queue_screen.dart';
 import 'supervisor_job_screen.dart';
 import 'supervisor_queue_screen.dart';
+import 'support_inbox_screen.dart';
 import 'upload_evidence_screen.dart';
 import 'work_orders_view.dart';
 
@@ -45,6 +46,7 @@ enum _WorkflowView {
   declineJob,
   billingPreview,
   jobChats,
+  supportInbox,
   supervisorQueue,
   supervisorJob,
   addUser,
@@ -202,6 +204,7 @@ class _IsdpShellState extends State<IsdpShell> {
                   onCloseDeclinedJob: _closeDeclinedJob,
                   onOpenJobChat: _openJobChat,
                   onOpenJobChats: _openJobChatsScreen,
+                  onOpenSupportInbox: _openSupportInboxScreen,
                 ),
               if (_role == AppRole.admin && _adminOrder != null)
                 _buildAdminJobPage(visibleOrders)
@@ -215,6 +218,7 @@ class _IsdpShellState extends State<IsdpShell> {
                 role: _role,
                 userProfile: widget.userProfile,
                 authRepository: widget.authRepository,
+                repository: _repository,
               ),
             ];
 
@@ -549,6 +553,10 @@ class _IsdpShellState extends State<IsdpShell> {
         orders: visibleOrders,
         repository: _repository,
         onOpenChat: _openJobChat,
+        onClose: _navigateBack,
+      ),
+      _WorkflowView.supportInbox => SupportInboxScreen(
+        repository: _repository,
         onClose: _navigateBack,
       ),
       _WorkflowView.supervisorQueue => SupervisorQueueScreen(
@@ -905,6 +913,20 @@ class _IsdpShellState extends State<IsdpShell> {
     _rememberNavigation();
     setState(() {
       _workflowView = _WorkflowView.jobChats;
+      _assigningOrder = null;
+      _scanningOrder = null;
+      _uploadingOrder = null;
+      _reviewingOrder = null;
+      _supervisorOrder = null;
+      _returnToReviewQueue = false;
+      _tab = 0;
+    });
+  }
+
+  void _openSupportInboxScreen() {
+    _rememberNavigation();
+    setState(() {
+      _workflowView = _WorkflowView.supportInbox;
       _assigningOrder = null;
       _scanningOrder = null;
       _uploadingOrder = null;

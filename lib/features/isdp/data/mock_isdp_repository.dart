@@ -88,4 +88,32 @@ class MockIsdpRepository implements IsdpRepository {
 
   @override
   Future<void> markJobChatRead(String workOrderId) async {}
+
+  @override
+  Stream<List<SupportMessage>> watchSupportMessages({int limit = 50}) =>
+      Stream.value(const []);
+
+  @override
+  Future<List<SupportMessage>> fetchSupportMessages({
+    int limit = 50,
+    SupportMessage? startAfterMessage,
+  }) async =>
+      const [];
+
+  @override
+  Stream<int> watchSupportMessageCount() => Stream.value(0);
+
+  @override
+  Future<void> sendSupportMessage({
+    required String message,
+    required String senderName,
+    required String senderRole,
+    required String senderEmail,
+  }) async {}
+
+  @override
+  Future<void> markSupportMessagesRead() async {}
+
+  @override
+  Future<void> clearLocalCache() async {}
 }

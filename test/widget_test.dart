@@ -126,10 +126,14 @@ void main() {
         ),
       ),
     );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
 
     expect(find.text('Admin Control'), findsOneWidget);
-    expect(find.text('Needs Approval'), findsOneWidget);
     expect(find.text('Admin Tools'), findsOneWidget);
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -500));
+    await tester.pumpAndSettle();
+    expect(find.text('Needs Approval'), findsOneWidget);
   });
 
   testWidgets('admin zero-job today view keeps action buttons', (tester) async {
@@ -141,11 +145,15 @@ void main() {
         ),
       ),
     );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.text('No jobs yet'), findsOneWidget);
     expect(find.text('Create Job'), findsOneWidget);
     expect(find.text('Review'), findsOneWidget);
     expect(find.text('Analytics'), findsOneWidget);
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -500));
+    await tester.pumpAndSettle();
+    expect(find.text('No jobs waiting'), findsOneWidget);
   });
 
   testWidgets('admin can delete a job from job details', (tester) async {
@@ -287,6 +295,7 @@ void main() {
         home: IsdpShell(initialRole: AppRole.admin, isdpRepository: repository),
       ),
     );
+    await tester.pumpAndSettle();
 
     final submitted = initial.copyWith(status: 'Submitted');
     repository.emit([submitted]);
@@ -312,8 +321,12 @@ void main() {
         home: IsdpShell(initialRole: AppRole.admin, isdpRepository: repository),
       ),
     );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
 
-    await tester.tap(find.byKey(const Key('empty-create-job-button')));
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -250));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('admin-create-job-button')));
     await tester.pumpAndSettle();
 
     final fields = find.byType(TextField);
@@ -420,7 +433,38 @@ void main() {
   });
 }
 
-class _TestIsdpRepository implements IsdpRepository {
+mixin _RepositoryTestStubs {
+  Future<void> declineWorkOrder(
+    WorkOrder order,
+    String reason, {
+    required bool allowResubmission,
+  }) async {}
+
+  Future<void> closeWorkOrder(WorkOrder order) async {}
+
+  Stream<List<SupportMessage>> watchSupportMessages({int limit = 50}) =>
+      Stream.value(const []);
+
+  Future<List<SupportMessage>> fetchSupportMessages({
+    int limit = 50,
+    SupportMessage? startAfterMessage,
+  }) async => const [];
+
+  Stream<int> watchSupportMessageCount() => Stream.value(0);
+
+  Future<void> sendSupportMessage({
+    required String message,
+    required String senderName,
+    required String senderRole,
+    required String senderEmail,
+  }) async {}
+
+  Future<void> markSupportMessagesRead() async {}
+
+  Future<void> clearLocalCache() async {}
+}
+
+class _TestIsdpRepository with _RepositoryTestStubs implements IsdpRepository {
   _TestIsdpRepository();
 
   final List<WorkOrder> _jobs = [
@@ -581,7 +625,7 @@ WorkOrder _assignableOrder() {
   );
 }
 
-class _EmptyIsdpRepository implements IsdpRepository {
+class _EmptyIsdpRepository with _RepositoryTestStubs implements IsdpRepository {
   @override
   List<WorkOrder> getWorkOrders() => const [];
 
@@ -745,7 +789,9 @@ class _SlowCreateIsdpRepository extends _EmptyIsdpRepository {
   }
 }
 
-class _CompletableIsdpRepository implements IsdpRepository {
+class _CompletableIsdpRepository
+    with _RepositoryTestStubs
+    implements IsdpRepository {
   final WorkOrder _job = WorkOrder(
     id: 'JOB-CMT-ESW-3001',
     site: 'Ready Site',

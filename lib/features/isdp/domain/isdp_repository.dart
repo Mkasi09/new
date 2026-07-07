@@ -61,4 +61,24 @@ abstract class IsdpRepository {
   Stream<int> watchUnreadJobMessageTotal(List<String> workOrderIds);
 
   Future<void> markJobChatRead(String workOrderId);
+
+  Stream<List<SupportMessage>> watchSupportMessages({int limit = 50});
+
+  Future<List<SupportMessage>> fetchSupportMessages({
+    int limit = 50,
+    SupportMessage? startAfterMessage,
+  });
+
+  Stream<int> watchSupportMessageCount();
+
+  Future<void> sendSupportMessage({
+    required String message,
+    required String senderName,
+    required String senderRole,
+    required String senderEmail,
+  });
+
+  Future<void> markSupportMessagesRead();
+
+  Future<void> clearLocalCache();
 }

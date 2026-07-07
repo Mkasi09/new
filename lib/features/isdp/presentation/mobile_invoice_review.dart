@@ -495,7 +495,7 @@ Future<Uint8List> _buildInvoicePdf({
   required Map<String, dynamic> data,
 }) async {
   final logoBytes = (await rootBundle.load(
-    'assets/logo1.png',
+    'assets/logo.png',
   )).buffer.asUint8List();
   final logo = pw.MemoryImage(logoBytes);
   final number = data['number'] as String? ?? invoiceId;

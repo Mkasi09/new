@@ -33,6 +33,7 @@ class DashboardView extends StatefulWidget {
     required this.onCloseDeclinedJob,
     required this.onOpenJobChat,
     required this.onOpenJobChats,
+    required this.onOpenSupportInbox,
   });
 
   final AppRole role;
@@ -59,6 +60,7 @@ class DashboardView extends StatefulWidget {
   final Future<void> Function(WorkOrder) onCloseDeclinedJob;
   final ValueChanged<WorkOrder> onOpenJobChat;
   final VoidCallback onOpenJobChats;
+  final VoidCallback onOpenSupportInbox;
 
   @override
   State<DashboardView> createState() => _DashboardViewState();
@@ -110,6 +112,7 @@ class _DashboardViewState extends State<DashboardView> {
         onOpenReviewOrder: widget.onOpenReviewOrder,
         onOpenJobChat: widget.onOpenJobChat,
         onOpenJobChats: widget.onOpenJobChats,
+        onOpenSupportInbox: widget.onOpenSupportInbox,
         repository: widget.repository,
       ),
       AppRole.supervisor => _SupervisorHome(
@@ -216,6 +219,7 @@ class _AdminHome extends StatelessWidget {
     required this.onOpenReviewOrder,
     required this.onOpenJobChat,
     required this.onOpenJobChats,
+    required this.onOpenSupportInbox,
     required this.repository,
   });
 
@@ -229,6 +233,7 @@ class _AdminHome extends StatelessWidget {
   final ValueChanged<WorkOrder> onOpenReviewOrder;
   final ValueChanged<WorkOrder> onOpenJobChat;
   final VoidCallback onOpenJobChats;
+  final VoidCallback onOpenSupportInbox;
   final IsdpRepository repository;
 
   @override
@@ -304,6 +309,12 @@ class _AdminHome extends StatelessWidget {
               badgeStream: repository.watchUnreadJobMessageTotal(
                 workOrders.map((order) => order.id).toList(),
               ),
+            ),
+            _RoleAction(
+              Icons.support_agent_outlined,
+              'Support Inbox',
+              onOpenSupportInbox,
+              badgeStream: repository.watchSupportMessageCount(),
             ),
             if (onAddUser != null)
               _RoleAction(
@@ -1293,7 +1304,7 @@ class _ActionGrid extends StatelessWidget {
               .map(
                 (action) => SizedBox(
                   width: itemWidth,
-                  height: 78,
+                  height: 88,
                   child: Stack(
                     clipBehavior: Clip.none,
                     children: [

@@ -343,6 +343,46 @@ class JobChatMessage {
   }
 }
 
+class SupportMessage {
+  const SupportMessage({
+    required this.id,
+    required this.senderId,
+    required this.senderName,
+    required this.senderRole,
+    required this.senderEmail,
+    required this.message,
+    required this.source,
+    required this.createdAt,
+    required this.status,
+  });
+
+  final String id;
+  final String senderId;
+  final String senderName;
+  final String senderRole;
+  final String senderEmail;
+  final String message;
+  final String source;
+  final DateTime createdAt;
+  final String status;
+
+  bool get sentViaSupport => source == 'support';
+
+  factory SupportMessage.fromMap(String id, Map<String, dynamic> map) {
+    return SupportMessage(
+      id: id,
+      senderId: map['senderId'] as String? ?? '',
+      senderName: displayPersonName(map['senderName'] as String?),
+      senderRole: map['senderRole'] as String? ?? 'User',
+      senderEmail: map['senderEmail'] as String? ?? '',
+      message: map['message'] as String? ?? '',
+      source: map['source'] as String? ?? 'support',
+      createdAt: _dateTimeFromMapValue(map['createdAt']) ?? DateTime.now(),
+      status: map['status'] as String? ?? 'new',
+    );
+  }
+}
+
 String displayPersonName(String? value) {
   final raw = value?.trim();
   if (raw == null || raw.isEmpty) return '';

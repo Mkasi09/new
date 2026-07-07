@@ -1,4 +1,4 @@
-const supportContactNumber = '0791762956';
-const supportContactMessage = 'Contact $supportContactNumber.';
+const supportContactEmail = 'itsupport@phephasecurity.co.za';
+const supportContactMessage = 'Contact $supportContactEmail.';
 
 String withSupportContact(String message) => '$message $supportContactMessage';

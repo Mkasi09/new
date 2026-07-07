@@ -27,6 +27,9 @@ class FirebaseIsdpRepository implements IsdpRepository {
   CollectionReference<Map<String, dynamic>> get _workOrders =>
       _firestore.collection('work_orders');
 
+  CollectionReference<Map<String, dynamic>> get _supportMessages =>
+      _firestore.collection('support_messages');
+
   late final List<Query<Map<String, dynamic>>> _visibleWorkOrderQueries =
       _buildVisibleWorkOrderQueries();
 
@@ -493,6 +496,101 @@ class FirebaseIsdpRepository implements IsdpRepository {
       SetOptions(merge: true),
     );
     await batch.commit();
+  }
+
+  @override
+  Stream<List<SupportMessage>> watchSupportMessages({int limit = 50}) {
+    final query = _supportMessagesQuery().limit(limit);
+    return query.snapshots().map(
+      (snapshot) => snapshot.docs
+          .map((doc) => SupportMessage.fromMap(doc.id, doc.data()))
+          .toList(),
+    );
+  }
+
+  @override
+  Future<List<SupportMessage>> fetchSupportMessages({
+    int limit = 50,
+    SupportMessage? startAfterMessage,
+  }) async {
+    var query = _supportMessagesQuery().limit(limit);
+    if (startAfterMessage != null) {
+      query = query.startAfter([
+        startAfterMessage.status,
+        Timestamp.fromDate(startAfterMessage.createdAt),
+      ]);
+    }
+    final snapshot = await query.get();
+    return snapshot.docs
+        .map((doc) => SupportMessage.fromMap(doc.id, doc.data()))
+        .toList();
+  }
+
+  Query<Map<String, dynamic>> _supportMessagesQuery() {
+    return role == AppRole.admin
+        ? _supportMessages
+              .orderBy('status')
+              .orderBy('createdAt', descending: true)
+        : _supportMessages
+              .where('senderId', isEqualTo: _uid)
+              .orderBy('status')
+              .orderBy('createdAt', descending: true);
+  }
+
+  @override
+  Stream<int> watchSupportMessageCount() {
+    if (role != AppRole.admin) return Stream.value(0);
+    return _supportMessages
+        .where('status', isEqualTo: 'new')
+        .limit(100)
+        .snapshots()
+        .map((snapshot) => snapshot.docs.length)
+        .distinct();
+  }
+
+  @override
+  Future<void> sendSupportMessage({
+    required String message,
+    required String senderName,
+    required String senderRole,
+    required String senderEmail,
+  }) async {
+    final trimmed = message.trim();
+    if (trimmed.isEmpty) return;
+    await _supportMessages.add({
+      'senderId': _uid,
+      'senderName': senderName.trim().isEmpty ? 'ISDP User' : senderName.trim(),
+      'senderRole': senderRole,
+      'senderEmail': senderEmail.trim(),
+      'message': trimmed,
+      'source': 'support',
+      'status': 'new',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  @override
+  Future<void> markSupportMessagesRead() async {
+    if (role != AppRole.admin) return;
+    final snapshot = await _supportMessages
+        .where('status', isEqualTo: 'new')
+        .limit(50)
+        .get();
+    if (snapshot.docs.isEmpty) return;
+    final batch = _firestore.batch();
+    for (final doc in snapshot.docs) {
+      batch.update(doc.reference, {
+        'status': 'read',
+        'readAt': FieldValue.serverTimestamp(),
+      });
+    }
+    await batch.commit();
+  }
+
+  @override
+  Future<void> clearLocalCache() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.remove(_workOrderCacheKey);
   }
 
   Future<void> _updateStatus(

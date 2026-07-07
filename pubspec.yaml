@@ -48,6 +48,9 @@ dependencies:
   huawei_push: ^6.15.0+300
   flutter_local_notifications: ^22.0.1
   shared_preferences: ^2.5.3
+  cached_network_image: ^3.4.1
+  package_info_plus: ^10.2.0
+  flutter_cache_manager: ^3.4.1
 
 dev_dependencies:
   flutter_test:

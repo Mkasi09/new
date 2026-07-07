@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../../../../app/theme/app_theme.dart';
@@ -40,10 +41,16 @@ class EvidencePhotoThumbnail extends StatelessWidget {
                         : Icons.image_not_supported_outlined,
                     color: color,
                   )
-                : Image.network(
-                    url,
+                : CachedNetworkImage(
+                    imageUrl: url,
                     fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) =>
+                    fadeInDuration: const Duration(milliseconds: 120),
+                    fadeOutDuration: const Duration(milliseconds: 80),
+                    placeholder: (context, url) => Icon(
+                      Icons.image_outlined,
+                      color: color.withValues(alpha: 0.72),
+                    ),
+                    errorWidget: (context, url, error) =>
                         Icon(Icons.image_not_supported_outlined, color: color),
                   )
           : Image.memory(bytes, fit: BoxFit.cover),
@@ -122,7 +129,23 @@ class EvidencePhotoViewer extends StatelessWidget {
                 maxScale: 5,
                 child: bytes != null
                     ? Image.memory(bytes, fit: BoxFit.contain)
-                    : Image.network(url!, fit: BoxFit.contain),
+                    : CachedNetworkImage(
+                        imageUrl: url!,
+                        fit: BoxFit.contain,
+                        fadeInDuration: const Duration(milliseconds: 120),
+                        fadeOutDuration: const Duration(milliseconds: 80),
+                        placeholder: (context, url) => const Center(
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                          ),
+                        ),
+                        errorWidget: (context, url, error) =>
+                            const Icon(
+                              Icons.image_not_supported_outlined,
+                              color: Colors.white,
+                              size: 42,
+                            ),
+                      ),
               ),
             ),
           ),

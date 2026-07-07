@@ -65,39 +65,52 @@ class _WorkOrdersViewState extends State<WorkOrdersView> {
                   onChanged: (value) => setState(() => _query = value.trim()),
                 );
                 final statusFilter = DropdownButtonFormField<String>(
+                  isExpanded: true,
                   initialValue: _filter,
                   decoration: const InputDecoration(
                     labelText: 'Status',
                     prefixIcon: Icon(Icons.filter_list),
                   ),
                   items: const [
-                    DropdownMenuItem(value: 'All', child: Text('All active')),
+                    DropdownMenuItem(
+                      value: 'All',
+                      child: Text('All active', overflow: TextOverflow.ellipsis),
+                    ),
                     DropdownMenuItem(
                       value: 'Assigned to Supervisor',
-                      child: Text('Routed'),
+                      child: Text('Routed', overflow: TextOverflow.ellipsis),
                     ),
                     DropdownMenuItem(
                       value: 'Accepted by Supervisor',
-                      child: Text('Accepted'),
+                      child: Text('Accepted', overflow: TextOverflow.ellipsis),
                     ),
                     DropdownMenuItem(
                       value: 'Dispatched',
-                      child: Text('Dispatched'),
+                      child: Text('Dispatched', overflow: TextOverflow.ellipsis),
                     ),
-                    DropdownMenuItem(value: 'On Site', child: Text('On Site')),
+                    DropdownMenuItem(
+                      value: 'On Site',
+                      child: Text('On Site', overflow: TextOverflow.ellipsis),
+                    ),
                     DropdownMenuItem(
                       value: 'Submitted',
-                      child: Text('Submitted'),
+                      child: Text('Submitted', overflow: TextOverflow.ellipsis),
                     ),
                     DropdownMenuItem(
                       value: 'Declined',
-                      child: Text('Declined'),
+                      child: Text('Declined', overflow: TextOverflow.ellipsis),
                     ),
                     DropdownMenuItem(
                       value: 'Approved',
-                      child: Text('Approved (last 14 days)'),
+                      child: Text(
+                        'Approved (last 14 days)',
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                    DropdownMenuItem(value: 'Closed', child: Text('Closed')),
+                    DropdownMenuItem(
+                      value: 'Closed',
+                      child: Text('Closed', overflow: TextOverflow.ellipsis),
+                    ),
                   ],
                   onChanged: (value) {
                     if (value != null) setState(() => _filter = value);
