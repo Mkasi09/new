@@ -140,12 +140,22 @@ class _IsdpShellState extends State<IsdpShell> {
           builder: (context, snapshot) {
             final liveOrders = _mergeWorkOrders(snapshot.data ?? const []);
             final visibleOrders = _visibleOrdersForRole(liveOrders);
-            _observeOrderNotifications(visibleOrders);
+            final waitingForJobs =
+                snapshot.connectionState == ConnectionState.waiting &&
+                visibleOrders.isEmpty;
+            // The initialData value is only a rendering placeholder. Using it
+            // as the notification baseline makes every existing Firestore job
+            // look new when the app is installed with an empty local cache.
+            if (snapshot.connectionState == ConnectionState.active) {
+              _observeOrderNotifications(visibleOrders);
+            }
             final selectedOrder = _selectedOrder(visibleOrders);
             final workflowPage = _buildWorkflowPage(visibleOrders);
             final pages = [
               if (workflowPage != null)
                 workflowPage
+              else if (waitingForJobs)
+                const _JobsLoadingView()
               else if (selectedOrder == null)
                 EmptyJobsView(
                   role: _role,
@@ -1228,6 +1238,7 @@ class _IsdpShellState extends State<IsdpShell> {
       _openCompletionDetails(order);
       return;
     }
+    final isResubmission = order.status == 'Declined';
     final complete = order.copyWith(
       status: 'Submitted',
       sla: 'Ready for approval',
@@ -1239,7 +1250,13 @@ class _IsdpShellState extends State<IsdpShell> {
     _replaceOrder(complete);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${order.id} submitted for Admin approval.')),
+      SnackBar(
+        content: Text(
+          isResubmission
+              ? '${order.id} resubmitted for Admin approval.'
+              : '${order.id} submitted for Admin approval.',
+        ),
+      ),
     );
   }
 
@@ -1646,6 +1663,29 @@ class _IsdpShellState extends State<IsdpShell> {
           decision.allowResubmission
               ? '${order.id} declined and returned.'
               : '${order.id} declined and closed.',
+        ),
+      ),
+    );
+  }
+}
+
+class _JobsLoadingView extends StatelessWidget {
+  const _JobsLoadingView();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SafeArea(
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 14),
+            Text(
+              'Loading your jobs...',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ],
         ),
       ),
     );

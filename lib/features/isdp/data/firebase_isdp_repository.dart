@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/domain/app_role.dart';
 import '../domain/entities.dart';
@@ -34,6 +36,7 @@ class FirebaseIsdpRepository implements IsdpRepository {
   ).asBroadcastStream();
 
   String get _uid => _firebaseAuth.currentUser?.uid ?? 'system';
+  String get _workOrderCacheKey => 'isdp_work_orders_${role.name}_$userId';
 
   List<Query<Map<String, dynamic>>> _buildVisibleWorkOrderQueries() {
     final approvalCutoff = Timestamp.fromDate(
@@ -113,22 +116,79 @@ class FirebaseIsdpRepository implements IsdpRepository {
 
   @override
   Stream<List<WorkOrder>> watchWorkOrders() {
-    return _visibleSnapshots.map((snapshots) {
-      final documents = <String, QueryDocumentSnapshot<Map<String, dynamic>>>{
-        for (final snapshot in snapshots)
-          for (final document in snapshot.docs) document.id: document,
-      };
-      final orders = documents.values
-          .map((doc) => WorkOrder.fromMap(doc.id, doc.data()))
-          .toList();
-      orders.sort((a, b) {
-        final aDate = a.approvedAt ?? a.submittedAt ?? a.dueAt;
-        final bDate = b.approvedAt ?? b.submittedAt ?? b.dueAt;
-        if (aDate == null || bDate == null) return 0;
-        return bDate.compareTo(aDate);
-      });
-      return orders;
+    late final StreamController<List<WorkOrder>> controller;
+    StreamSubscription<List<QuerySnapshot<Map<String, dynamic>>>>? subscription;
+    var hasLiveData = false;
+
+    controller = StreamController<List<WorkOrder>>(
+      onListen: () {
+        subscription = _visibleSnapshots.listen((snapshots) {
+          hasLiveData = true;
+          final orders = _ordersFromSnapshots(snapshots);
+          unawaited(_saveCachedWorkOrders(orders));
+          controller.add(orders);
+        }, onError: controller.addError);
+        unawaited(
+          _loadCachedWorkOrders().then((cached) {
+            if (!hasLiveData && cached.isNotEmpty && !controller.isClosed) {
+              controller.add(cached);
+            }
+          }),
+        );
+      },
+      onCancel: () => subscription?.cancel(),
+    );
+    return controller.stream;
+  }
+
+  List<WorkOrder> _ordersFromSnapshots(
+    List<QuerySnapshot<Map<String, dynamic>>> snapshots,
+  ) {
+    final documents = <String, QueryDocumentSnapshot<Map<String, dynamic>>>{
+      for (final snapshot in snapshots)
+        for (final document in snapshot.docs) document.id: document,
+    };
+    final orders = documents.values
+        .map((doc) => WorkOrder.fromMap(doc.id, doc.data()))
+        .toList();
+    orders.sort((a, b) {
+      final aDate = a.approvedAt ?? a.submittedAt ?? a.dueAt;
+      final bDate = b.approvedAt ?? b.submittedAt ?? b.dueAt;
+      if (aDate == null || bDate == null) return 0;
+      return bDate.compareTo(aDate);
     });
+    return orders;
+  }
+
+  Future<List<WorkOrder>> _loadCachedWorkOrders() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      final encoded = preferences.getString(_workOrderCacheKey);
+      if (encoded == null || encoded.isEmpty) return const [];
+      final values = jsonDecode(encoded) as List<dynamic>;
+      return values.whereType<Map>().map((value) {
+        final entry = Map<String, dynamic>.from(value);
+        return WorkOrder.fromMap(
+          entry['id'] as String,
+          Map<String, dynamic>.from(entry['data'] as Map),
+        );
+      }).toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> _saveCachedWorkOrders(List<WorkOrder> orders) async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      final values = orders
+          .take(100)
+          .map((order) => {'id': order.id, 'data': order.toMap()})
+          .toList(growable: false);
+      await preferences.setString(_workOrderCacheKey, jsonEncode(values));
+    } catch (_) {
+      // Firestore remains the source of truth if local cache storage fails.
+    }
   }
 
   @override
@@ -242,6 +302,7 @@ class FirebaseIsdpRepository implements IsdpRepository {
 
   @override
   Future<void> submitCompletion(WorkOrder order) {
+    final isResubmission = order.declineReason?.trim().isNotEmpty == true;
     return _workOrders.doc(order.id).update({
       'status': 'Submitted',
       'sla': 'Ready for approval',
@@ -258,7 +319,9 @@ class FirebaseIsdpRepository implements IsdpRepository {
       'declineReason': null,
       'declinedAt': null,
       'updatedAt': FieldValue.serverTimestamp(),
-      'history': FieldValue.arrayUnion([_historyEntry('submitted')]),
+      'history': FieldValue.arrayUnion([
+        _historyEntry(isResubmission ? 'resubmitted' : 'submitted'),
+      ]),
     });
   }
 

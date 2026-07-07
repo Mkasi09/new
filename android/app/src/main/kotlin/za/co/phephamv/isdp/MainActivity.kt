@@ -1,6 +1,7 @@
 package za.co.phephamv.isdp
 
 import android.content.pm.PackageManager
+import android.os.Build
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -19,6 +20,9 @@ class MainActivity : FlutterActivity() {
                 }
                 "isHuaweiMobileServicesAvailable" -> {
                     result.success(isHuaweiMobileServicesInstalled())
+                }
+                "isHuaweiDevice" -> {
+                    result.success(isHuaweiOrHonorDevice())
                 }
                 else -> result.notImplemented()
             }
@@ -47,5 +51,14 @@ class MainActivity : FlutterActivity() {
         } catch (_: PackageManager.NameNotFoundException) {
             false
         }
+    }
+
+    private fun isHuaweiOrHonorDevice(): Boolean {
+        val manufacturer = Build.MANUFACTURER.lowercase()
+        val brand = Build.BRAND.lowercase()
+        return manufacturer.contains("huawei") ||
+            manufacturer.contains("honor") ||
+            brand.contains("huawei") ||
+            brand.contains("honor")
     }
 }

@@ -148,7 +148,10 @@ class _MobileInvoiceCreatorState extends State<MobileInvoiceCreator> {
           .where('workOrderId', isEqualTo: widget.order.id)
           .limit(1)
           .get();
-      if (existing.docs.isNotEmpty) {
+      final hasActiveInvoice = existing.docs.any(
+        (document) => document.data()['status'] != 'voided',
+      );
+      if (hasActiveInvoice) {
         throw StateError('An invoice already exists for this job.');
       }
       final now = DateTime.now();

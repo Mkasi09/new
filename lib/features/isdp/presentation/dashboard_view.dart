@@ -584,10 +584,23 @@ class _TechnicianHome extends StatelessWidget {
                   ),
                   if (!finalDecline) ...[
                     const SizedBox(height: 12),
-                    OutlinedButton.icon(
-                      onPressed: () => onCloseDeclinedJob(order),
-                      icon: const Icon(Icons.close),
-                      label: const Text('Close Job'),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        FilledButton.icon(
+                          onPressed: completionReady
+                              ? () => onSubmitCompletion(order)
+                              : null,
+                          icon: const Icon(Icons.outbox_outlined),
+                          label: const Text('Resubmit Job'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: () => onCloseDeclinedJob(order),
+                          icon: const Icon(Icons.close),
+                          label: const Text('Close Job'),
+                        ),
+                      ],
                     ),
                   ],
                 ],
@@ -603,6 +616,7 @@ class _TechnicianHome extends StatelessWidget {
           afterUploaded: afterUploaded,
           completionReady: completionReady,
           submitted: submitted,
+          resubmission: order.status == 'Declined',
           onScanSiteQr: arrivalVerified ? null : () => onScanSiteQr(context),
           onUploadBefore: beforeUploaded
               ? null
@@ -890,6 +904,7 @@ class _TodayActionPanel extends StatelessWidget {
     required this.afterUploaded,
     required this.completionReady,
     required this.submitted,
+    required this.resubmission,
     required this.onScanSiteQr,
     required this.onUploadBefore,
     required this.onUploadAfter,
@@ -905,6 +920,7 @@ class _TodayActionPanel extends StatelessWidget {
   final bool afterUploaded;
   final bool completionReady;
   final bool submitted;
+  final bool resubmission;
   final VoidCallback? onScanSiteQr;
   final VoidCallback? onUploadBefore;
   final VoidCallback? onUploadAfter;
@@ -964,14 +980,14 @@ class _TodayActionPanel extends StatelessWidget {
             const Divider(height: 18),
             _CompactWorkActionRow(
               icon: Icons.outbox_outlined,
-              title: 'Submit job',
+              title: resubmission ? 'Resubmit corrected job' : 'Submit job',
               complete: submitted,
               enabled:
                   arrivalVerified &&
                   beforeUploaded &&
                   afterUploaded &&
                   completionReady,
-              buttonLabel: 'Submit',
+              buttonLabel: resubmission ? 'Resubmit' : 'Submit',
               onTap: onSubmitCompletion,
             ),
             const Divider(height: 18),

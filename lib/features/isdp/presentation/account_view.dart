@@ -846,7 +846,7 @@ class _NotificationSettingsScreenState
       SnackBar(
         content: Text(
           status.enabled
-              ? 'Phone notifications are registered.'
+              ? 'Phone notifications are registered with ${status.provider?.toUpperCase() ?? 'push services'}.'
               : 'Notifications are not ready. $supportContactMessage',
         ),
       ),
@@ -858,7 +858,9 @@ class _NotificationSettingsScreenState
       AuthorizationStatus.denied => 'Permission denied in phone settings',
       AuthorizationStatus.notDetermined => 'Permission has not been allowed',
       AuthorizationStatus.authorized || AuthorizationStatus.provisional =>
-        status.tokenSaved ? 'Ready on this phone' : 'Token was not saved',
+        status.tokenSaved
+            ? 'Ready on this phone (${status.provider?.toUpperCase() ?? 'push'})'
+            : 'Token was not saved',
     };
   }
 }

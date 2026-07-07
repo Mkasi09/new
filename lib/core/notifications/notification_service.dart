@@ -59,10 +59,15 @@ class NotificationService {
     String userId, {
     bool force = false,
   }) async {
-    if (await _canUseFirebaseMessaging()) {
-      return _registerFirebaseDevice(userId, force: force);
+    final canUseHuawei = await _canUseHuaweiPush();
+    if (canUseHuawei && await _shouldPreferHuaweiPush()) {
+      return _registerHuaweiDevice(userId, force: force);
     }
-    if (await _canUseHuaweiPush()) {
+    if (await _canUseFirebaseMessaging()) {
+      final firebase = await _registerFirebaseDevice(userId, force: force);
+      if (firebase.tokenSaved || !canUseHuawei) return firebase;
+    }
+    if (canUseHuawei) {
       return _registerHuaweiDevice(userId, force: force);
     }
     return NotificationRegistrationStatus(
@@ -308,6 +313,20 @@ class NotificationService {
       return await _deviceServices.invokeMethod<bool>(
             'isHuaweiMobileServicesAvailable',
           ) ??
+          false;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  static Future<bool> _shouldPreferHuaweiPush() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      return false;
+    }
+    try {
+      return await _deviceServices.invokeMethod<bool>('isHuaweiDevice') ??
           false;
     } on PlatformException {
       return false;

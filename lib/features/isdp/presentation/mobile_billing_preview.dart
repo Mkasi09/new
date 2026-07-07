@@ -57,7 +57,7 @@ class MobileBillingPreview extends StatelessWidget {
                 SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'Mobile creates draft invoices. Issue, email, payment, and PDF actions remain on desktop.',
+                    'Create, edit, issue, share, download, record payment, and void invoices directly from mobile.',
                     style: TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
@@ -114,13 +114,13 @@ class MobileBillingPreview extends StatelessWidget {
             style: const TextStyle(color: AppTheme.muted),
           ),
         const SizedBox(height: 18),
-        const SectionTitle('Recent Invoices'),
+        const SectionTitle('All Invoices'),
         const SizedBox(height: 10),
         StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
           stream: FirebaseFirestore.instance
               .collection('invoices')
               .orderBy('createdAt', descending: true)
-              .limit(5)
+              .limit(50)
               .snapshots(),
           builder: (context, snapshot) {
             if (snapshot.hasError) {
