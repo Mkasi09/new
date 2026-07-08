@@ -11,6 +11,7 @@ import 'package:isdp/features/isdp/domain/isdp_repository.dart';
 import 'package:isdp/features/isdp/presentation/assign_technician_screen.dart';
 import 'package:isdp/features/isdp/presentation/analytics_view.dart';
 import 'package:isdp/features/isdp/presentation/isdp_shell.dart';
+import 'package:isdp/features/isdp/presentation/job_chats_screen.dart';
 import 'package:isdp/features/isdp/presentation/completion_details_screen.dart';
 import 'package:isdp/features/isdp/presentation/upload_evidence_screen.dart';
 
@@ -126,8 +127,7 @@ void main() {
         ),
       ),
     );
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pumpAndSettle();
 
     expect(find.text('Admin Control'), findsOneWidget);
     expect(find.text('Admin Tools'), findsOneWidget);
@@ -145,15 +145,12 @@ void main() {
         ),
       ),
     );
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pumpAndSettle();
 
     expect(find.text('Create Job'), findsOneWidget);
     expect(find.text('Review'), findsOneWidget);
     expect(find.text('Analytics'), findsOneWidget);
-    await tester.drag(find.byType(Scrollable).first, const Offset(0, -500));
-    await tester.pumpAndSettle();
-    expect(find.text('No jobs waiting'), findsOneWidget);
+    expect(find.text('No jobs yet'), findsOneWidget);
   });
 
   testWidgets('admin can delete a job from job details', (tester) async {
@@ -311,6 +308,40 @@ void main() {
     expect(find.text('Job submitted'), findsOneWidget);
   });
 
+  testWidgets('approved chat is listed only while it has unread messages', (
+    tester,
+  ) async {
+    final order = _assignableOrder().copyWith(status: 'Approved');
+
+    await tester.pumpWidget(
+      IsdpApp(
+        home: JobChatsScreen(
+          orders: [order],
+          repository: _UnreadChatRepository(1),
+          onOpenChat: (_) {},
+          onClose: () {},
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Assignment Site'), findsOneWidget);
+
+    await tester.pumpWidget(
+      IsdpApp(
+        home: JobChatsScreen(
+          orders: [order],
+          repository: _UnreadChatRepository(0),
+          onOpenChat: (_) {},
+          onClose: () {},
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Assignment Site'), findsNothing);
+  });
+
   testWidgets('create job ignores duplicate taps while save is pending', (
     tester,
   ) async {
@@ -321,12 +352,9 @@ void main() {
         home: IsdpShell(initialRole: AppRole.admin, isdpRepository: repository),
       ),
     );
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-
-    await tester.drag(find.byType(Scrollable).first, const Offset(0, -250));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('admin-create-job-button')));
+
+    await tester.tap(find.byKey(const Key('empty-create-job-button')));
     await tester.pumpAndSettle();
 
     final fields = find.byType(TextField);
@@ -742,6 +770,20 @@ class _NotificationStreamRepository extends _EmptyIsdpRepository {
     yield _orders;
     yield* _controller.stream;
   }
+}
+
+class _UnreadChatRepository extends _EmptyIsdpRepository {
+  _UnreadChatRepository(this.count);
+
+  final int count;
+
+  @override
+  Stream<int> watchUnreadJobMessageCount(String workOrderId) =>
+      Stream.value(count);
+
+  @override
+  Stream<int> watchUnreadJobMessageTotal(List<String> workOrderIds) =>
+      Stream.value(count);
 }
 
 class _DeletableIsdpRepository extends _EmptyIsdpRepository {

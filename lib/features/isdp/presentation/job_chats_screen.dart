@@ -21,13 +21,15 @@ class JobChatsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final activeOrders =
-        orders
-            .where(
-              (order) => order.status != 'Approved' && order.status != 'Closed',
-            )
-            .toList()
+    final chatOrders =
+        orders.where((order) => order.status != 'Closed').toList()
           ..sort(_compareChatActivity);
+    final activeOrders = chatOrders
+        .where((order) => order.status != 'Approved')
+        .toList();
+    final approvedOrders = chatOrders
+        .where((order) => order.status == 'Approved')
+        .toList();
 
     return AppScrollView(
       children: [
@@ -40,82 +42,136 @@ class JobChatsScreen extends StatelessWidget {
             ),
             const SizedBox(width: 4),
             const Expanded(child: SectionTitle('Job Chats')),
-            _UnreadTotalBadge(repository: repository, orders: activeOrders),
+            _UnreadTotalBadge(repository: repository, orders: chatOrders),
           ],
         ),
         const SizedBox(height: 12),
-        if (activeOrders.isEmpty)
+        if (activeOrders.isEmpty && approvedOrders.isEmpty)
           const Card(
             child: Padding(
               padding: EdgeInsets.all(18),
               child: Text('No active jobs have chats yet.'),
             ),
           )
-        else
+        else ...[
           ...activeOrders.map(
-            (order) => Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          IconPill(
-                            icon: Icons.forum_outlined,
-                            color: workOrderStatusColor(order.status),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  order.site,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                                ),
-                                const SizedBox(height: 3),
-                                Text(
-                                  _chatDetail(order),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(color: AppTheme.muted),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          _UnreadJobBadge(repository: repository, order: order),
-                          const SizedBox(width: 8),
-                          StatusChip(
-                            label: order.status,
-                            color: workOrderStatusColor(order.status),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: () => onOpenChat(order),
-                          icon: const Icon(Icons.chat_bubble_outline),
-                          label: const Text('Open Chat'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+            (order) => _ChatOrderCard(
+              order: order,
+              repository: repository,
+              onOpenChat: onOpenChat,
             ),
           ),
+          ...approvedOrders.map(
+            (order) => _UnreadApprovedChat(
+              order: order,
+              repository: repository,
+              onOpenChat: onOpenChat,
+            ),
+          ),
+        ],
       ],
+    );
+  }
+}
+
+class _UnreadApprovedChat extends StatelessWidget {
+  const _UnreadApprovedChat({
+    required this.order,
+    required this.repository,
+    required this.onOpenChat,
+  });
+
+  final WorkOrder order;
+  final IsdpRepository repository;
+  final ValueChanged<WorkOrder> onOpenChat;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<int>(
+      stream: repository.watchUnreadJobMessageCount(order.id),
+      builder: (context, snapshot) {
+        if ((snapshot.data ?? 0) == 0) return const SizedBox.shrink();
+        return _ChatOrderCard(
+          order: order,
+          repository: repository,
+          onOpenChat: onOpenChat,
+        );
+      },
+    );
+  }
+}
+
+class _ChatOrderCard extends StatelessWidget {
+  const _ChatOrderCard({
+    required this.order,
+    required this.repository,
+    required this.onOpenChat,
+  });
+
+  final WorkOrder order;
+  final IsdpRepository repository;
+  final ValueChanged<WorkOrder> onOpenChat;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  IconPill(
+                    icon: Icons.forum_outlined,
+                    color: workOrderStatusColor(order.status),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          order.site,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w900),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          _chatDetail(order),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: AppTheme.muted),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _UnreadJobBadge(repository: repository, order: order),
+                  const SizedBox(width: 8),
+                  StatusChip(
+                    label: order.status,
+                    color: workOrderStatusColor(order.status),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => onOpenChat(order),
+                  icon: const Icon(Icons.chat_bubble_outline),
+                  label: const Text('Open Chat'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

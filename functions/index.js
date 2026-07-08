@@ -5,11 +5,10 @@ const { getAuth } = require("firebase-admin/auth");
 const { FieldValue, getFirestore } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 const { defineSecret, defineString } = require("firebase-functions/params");
+const { huaweiPushUrl } = require("./huawei_push");
 
 initializeApp();
 
-const huaweiClientId = defineString("HUAWEI_CLIENT_ID");
-const huaweiProjectId = defineString("HUAWEI_PROJECT_ID");
 const huaweiAppId = defineString("HUAWEI_APP_ID");
 const huaweiClientSecret = defineSecret("HUAWEI_CLIENT_SECRET");
 const huaweiSecrets = [huaweiClientSecret];
@@ -413,10 +412,9 @@ async function sendToHuaweiTokens(tokens, message) {
     return { successCount: 0, failureCount: 0 };
   }
 
-  const projectId = cleanString(huaweiProjectId.value());
   const appId = cleanString(huaweiAppId.value());
-  if (!projectId && !appId) {
-    console.warn("HMS tokens found, but HUAWEI_PROJECT_ID or HUAWEI_APP_ID is not configured.");
+  if (!appId) {
+    console.warn("HMS tokens found, but HUAWEI_APP_ID is not configured.");
     return { successCount: 0, failureCount: tokens.length };
   }
 
@@ -432,7 +430,7 @@ async function sendToHuaweiTokens(tokens, message) {
   for (let index = 0; index < tokens.length; index += 500) {
     const batch = tokens.slice(index, index + 500);
     const response = await fetch(
-      `https://push-api.cloud.huawei.com/v2/${projectId || appId}/messages:send`,
+      huaweiPushUrl(appId),
       {
         method: "POST",
         headers: {
@@ -480,7 +478,7 @@ async function getHuaweiAccessToken() {
     return huaweiAccessToken;
   }
 
-  const clientId = cleanString(huaweiClientId.value());
+  const clientId = cleanString(huaweiAppId.value());
   const clientSecret = cleanString(huaweiClientSecret.value());
   if (!clientId || !clientSecret) {
     throw new Error("Huawei Push Kit server credentials are not configured.");

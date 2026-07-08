@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -44,6 +45,17 @@ class NotificationService {
   static StreamSubscription<hms.RemoteMessage>? _huaweiForegroundSubscription;
   static StreamSubscription<String>? _huaweiTokenSubscription;
   static String? _huaweiTokenUserId;
+  static final StreamController<String> _openedWorkOrders =
+      StreamController<String>.broadcast();
+  static String? _pendingOpenedWorkOrder;
+
+  static Stream<String> get openedWorkOrders => _openedWorkOrders.stream;
+
+  static String? takePendingOpenedWorkOrder() {
+    final value = _pendingOpenedWorkOrder;
+    _pendingOpenedWorkOrder = null;
+    return value;
+  }
 
   static const AndroidNotificationChannel _androidChannel =
       AndroidNotificationChannel(
@@ -183,7 +195,12 @@ class NotificationService {
       iOS: DarwinInitializationSettings(),
     );
 
-    await _localNotifications.initialize(settings: initializationSettings);
+    await _localNotifications.initialize(
+      settings: initializationSettings,
+      onDidReceiveNotificationResponse: (response) {
+        _emitOpenedWorkOrder(response.payload);
+      },
+    );
     await _localNotifications
         .resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin
@@ -193,6 +210,13 @@ class NotificationService {
     await _foregroundSubscription?.cancel();
     _foregroundSubscription = FirebaseMessaging.onMessage.listen(
       _showForegroundNotification,
+    );
+    FirebaseMessaging.onMessageOpenedApp.listen((message) {
+      _emitOpenedWorkOrder(message.data['workOrderId'] as String?);
+    });
+    final initialFirebaseMessage = await _messaging.getInitialMessage();
+    _emitOpenedWorkOrder(
+      initialFirebaseMessage?.data['workOrderId'] as String?,
     );
     _localNotificationsReady = true;
   }
@@ -252,6 +276,42 @@ class NotificationService {
     _huaweiForegroundSubscription ??= hms.Push.onMessageReceivedStream.listen(
       _showHuaweiForegroundNotification,
     );
+    hms.Push.onNotificationOpenedApp.listen(_handleHuaweiNotificationOpen);
+    _handleHuaweiNotificationOpen(await hms.Push.getInitialNotification());
+  }
+
+  static void _handleHuaweiNotificationOpen(dynamic notification) {
+    _emitOpenedWorkOrder(_findWorkOrderId(notification));
+  }
+
+  static String? _findWorkOrderId(dynamic value) {
+    if (value is Map) {
+      final direct = value['workOrderId'];
+      if (direct is String && direct.isNotEmpty) return direct;
+      for (final nested in value.values) {
+        final found = _findWorkOrderId(nested);
+        if (found != null) return found;
+      }
+    } else if (value is Iterable) {
+      for (final nested in value) {
+        final found = _findWorkOrderId(nested);
+        if (found != null) return found;
+      }
+    } else if (value is String && value.startsWith('{')) {
+      try {
+        return _findWorkOrderId(jsonDecode(value));
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  static void _emitOpenedWorkOrder(String? workOrderId) {
+    if (workOrderId == null || workOrderId.trim().isEmpty) return;
+    final value = workOrderId.trim();
+    _pendingOpenedWorkOrder = value;
+    _openedWorkOrders.add(value);
   }
 
   static Future<String> _requestHuaweiToken() async {

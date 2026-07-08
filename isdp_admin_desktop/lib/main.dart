@@ -1141,6 +1141,9 @@ class JobChatsView extends StatelessWidget {
     final activeOrders =
         orders.where((order) => order.status != 'Approved').toList()
           ..sort(_compareChatActivity);
+    final approvedOrders =
+        orders.where((order) => order.status == 'Approved').toList()
+          ..sort(_compareChatActivity);
 
     return _Page(
       children: [
@@ -1149,27 +1152,50 @@ class JobChatsView extends StatelessWidget {
           trailing: _DesktopUnreadTotalBadge(
             repository: repository,
             session: session,
-            orders: activeOrders,
+            orders: orders,
           ),
-          child: activeOrders.isEmpty
-              ? const _EmptyState(message: 'No active jobs available for chat.')
-              : Column(
-                  children: [
-                    for (final order in activeOrders)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: _JobChatRow(
-                          order: order,
-                          repository: repository,
-                          session: session,
-                          onOpen: onOpen,
-                        ),
+          child: FutureBuilder<List<WorkOrder>>(
+            future: _approvedOrdersWithUnread(approvedOrders),
+            builder: (context, snapshot) {
+              final visibleOrders = [...activeOrders, ...?snapshot.data];
+              if (visibleOrders.isEmpty) {
+                return const _EmptyState(
+                  message: 'No active or unread job chats.',
+                );
+              }
+              return Column(
+                children: [
+                  for (final order in visibleOrders)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _JobChatRow(
+                        order: order,
+                        repository: repository,
+                        session: session,
+                        onOpen: onOpen,
                       ),
-                  ],
-                ),
+                    ),
+                ],
+              );
+            },
+          ),
         ),
       ],
     );
+  }
+
+  Future<List<WorkOrder>> _approvedOrdersWithUnread(
+    List<WorkOrder> approvedOrders,
+  ) async {
+    final counts = await Future.wait(
+      approvedOrders.map(
+        (order) => repository.fetchUnreadJobMessageCount(session, order.id),
+      ),
+    );
+    return [
+      for (var index = 0; index < approvedOrders.length; index++)
+        if (counts[index] > 0) approvedOrders[index],
+    ];
   }
 }
 

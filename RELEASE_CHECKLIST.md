@@ -5,7 +5,7 @@
 - Merge conflicts removed.
 - Mobile analysis and tests pass.
 - Android debug APK builds.
-- Android release compilation and App Bundle packaging pass with a temporary test key.
+- Android release compilation and App Bundle packaging pass with the production upload key.
 - Windows admin analysis, tests, and release build pass.
 - Final Android package and iOS bundle ID are `za.co.phephamv.isdp`.
 - Matching Firebase Android and iOS applications are registered.
@@ -14,22 +14,18 @@
 
 ## Required before distributing Android
 
-Create and securely back up a production upload keystore. Do not reuse the debug key used during build verification.
+- Securely back up `android/app/production-upload-keystore.jks` and
+  `android/key.properties` outside this computer. Losing the upload key or its
+  password can prevent future app updates.
+- Keep both files private; they are ignored by Git.
+- The upload certificate SHA-256 fingerprint is
+  `8D:5E:F9:89:0A:EF:98:93:B8:2C:57:65:BE:57:77:9D:37:35:41:33:EE:B8:E1:71:DB:28:65:09:B2:72:7C:19`.
 
-```powershell
-& 'C:\Program Files\Android\Android Studio\jbr\bin\keytool.exe' `
-  -genkeypair -v `
-  -keystore C:\dev\ISDP\android\app\upload-keystore.jks `
-  -keyalg RSA -keysize 2048 -validity 10000 -alias upload
-```
-
-Copy `android/key.properties.example` to `android/key.properties`, replace both passwords, and then build:
+Build subsequent release bundles with:
 
 ```powershell
 flutter build appbundle --release --no-pub
 ```
-
-Both the keystore and `key.properties` are ignored by Git. Back up the keystore and passwords outside this computer.
 
 ## Required before distributing iOS
 

@@ -7,6 +7,7 @@ import 'package:printing/printing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/domain/app_role.dart';
+import '../../../core/notifications/notification_service.dart';
 import '../../../core/support/support_contact.dart';
 import '../../auth/domain/auth_repository.dart';
 import '../data/mock_isdp_repository.dart';
@@ -97,6 +98,8 @@ class _IsdpShellState extends State<IsdpShell> {
   final List<_NavigationSnapshot> _navigationHistory = [];
   List<AppUserProfile> _technicians = const [];
   bool _notificationsInitialized = false;
+  StreamSubscription<String>? _notificationOpenSubscription;
+  String? _pendingChatOrderId;
 
   @override
   void initState() {
@@ -105,6 +108,16 @@ class _IsdpShellState extends State<IsdpShell> {
       unawaited(_loadTechnicians());
     }
     unawaited(_loadReadNotifications());
+    _notificationOpenSubscription = NotificationService.openedWorkOrders.listen(
+      _openChatFromNotification,
+    );
+    _pendingChatOrderId = NotificationService.takePendingOpenedWorkOrder();
+  }
+
+  @override
+  void dispose() {
+    _notificationOpenSubscription?.cancel();
+    super.dispose();
   }
 
   @override
@@ -142,6 +155,7 @@ class _IsdpShellState extends State<IsdpShell> {
           builder: (context, snapshot) {
             final liveOrders = _mergeWorkOrders(snapshot.data ?? const []);
             final visibleOrders = _visibleOrdersForRole(liveOrders);
+            _openPendingNotificationChat(visibleOrders);
             final waitingForJobs =
                 snapshot.connectionState == ConnectionState.waiting &&
                 visibleOrders.isEmpty;
@@ -736,6 +750,35 @@ class _IsdpShellState extends State<IsdpShell> {
         ),
       ),
     );
+  }
+
+  void _openChatFromNotification(String orderId) {
+    final order =
+        _knownOrders[orderId] ??
+        _workOrders.cast<WorkOrder?>().firstWhere(
+          (candidate) => candidate?.id == orderId,
+          orElse: () => null,
+        );
+    if (order == null) {
+      _pendingChatOrderId = orderId;
+      return;
+    }
+    _pendingChatOrderId = null;
+    _openJobChat(order);
+  }
+
+  void _openPendingNotificationChat(List<WorkOrder> orders) {
+    final orderId = _pendingChatOrderId;
+    if (orderId == null) return;
+    final order = orders.cast<WorkOrder?>().firstWhere(
+      (candidate) => candidate?.id == orderId,
+      orElse: () => null,
+    );
+    if (order == null) return;
+    _pendingChatOrderId = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _openJobChat(order);
+    });
   }
 
   void _closeAdminJob() {
