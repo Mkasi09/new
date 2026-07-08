@@ -13,7 +13,7 @@ It is deliberately not a generic HTTP benchmark. The Firebase client SDK is used
 
 ## Safety
 
-The scripts permanently refuse to target the current production project, `magzmotron-5ae93`. A project must use a name containing `test`, `staging`, `load` or `demo`, or its exact ID must be supplied in `LOAD_TEST_ALLOW_PROJECT`.
+The scripts permanently refuse to target the production projects, `phepha-mv-isdp` and `magzmotron-5ae93`. A project must use a name containing `test`, `staging`, `load` or `demo`, or its exact ID must be supplied in `LOAD_TEST_ALLOW_PROJECT`.
 
 Use a dedicated billed staging Firebase project in the same region as production. Never put real notification tokens in its test-user documents. Seeding new work orders fires deployed Firestore triggers, so either seed before deploying Functions or intentionally include those invocations in the staging-cost budget.
 

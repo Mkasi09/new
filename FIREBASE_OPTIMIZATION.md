@@ -21,7 +21,7 @@ The app is not live yet, so no data migration is required. Start production with
 
    ```powershell
    cd C:\dev\ISDP
-   firebase deploy --only firestore:rules,firestore:indexes --project magzmotron-5ae93
+   firebase deploy --only firestore:rules,firestore:indexes --project phepha-mv-isdp
    ```
 
 2. Wait until both composite indexes show `Enabled` in the Firebase console.
@@ -29,7 +29,7 @@ The app is not live yet, so no data migration is required. Start production with
 
    ```powershell
    cd C:\dev\ISDP
-   firebase deploy --only functions --project magzmotron-5ae93
+   firebase deploy --only functions --project phepha-mv-isdp
    ```
 
 4. Release the updated Flutter app.

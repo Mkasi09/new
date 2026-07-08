@@ -5,8 +5,10 @@ const { getAuth } = require("firebase-admin/auth");
 const { FieldValue, getFirestore } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 const { defineSecret, defineString } = require("firebase-functions/params");
+const { setGlobalOptions } = require("firebase-functions/v2/options");
 const { huaweiPushUrl } = require("./huawei_push");
 
+setGlobalOptions({ region: "africa-south1" });
 initializeApp();
 
 const huaweiAppId = defineString("HUAWEI_APP_ID");

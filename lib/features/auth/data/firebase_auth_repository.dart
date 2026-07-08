@@ -12,7 +12,8 @@ class FirebaseAuthRepository implements AuthRepository {
     FirebaseFunctions? functions,
   }) : _firebaseAuth = firebaseAuth ?? FirebaseAuth.instance,
        _firestore = firestore ?? FirebaseFirestore.instance,
-       _functions = functions ?? FirebaseFunctions.instance;
+       _functions =
+           functions ?? FirebaseFunctions.instanceFor(region: 'africa-south1');
 
   final FirebaseAuth _firebaseAuth;
   final FirebaseFirestore _firestore;

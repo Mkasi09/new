@@ -10,8 +10,8 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:qr_flutter/qr_flutter.dart';
 
-const _firebaseApiKey = 'AIzaSyD0pYM5_xXEaYhtRqzi4vpPAGhNDVEBKYA';
-const _firebaseProjectId = 'magzmotron-5ae93';
+const _firebaseApiKey = 'AIzaSyDR2jT8OaKsPJI-mdjQqRi88kWOdT3lVKY';
+const _firebaseProjectId = 'phepha-mv-isdp';
 const _supportContactNumber = '0791762956';
 const _supportContactMessage = 'Contact $_supportContactNumber.';
 

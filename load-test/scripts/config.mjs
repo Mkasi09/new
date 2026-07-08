@@ -1,6 +1,6 @@
 import 'dotenv/config';
 
-const FORBIDDEN_PROJECTS = new Set(['magzmotron-5ae93']);
+const FORBIDDEN_PROJECTS = new Set(['phepha-mv-isdp', 'magzmotron-5ae93']);
 
 export function parseArgs(argv = process.argv.slice(2)) {
   const result = {};

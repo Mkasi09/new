@@ -1,33 +1,13 @@
 {
   "project_info": {
-    "project_number": "1091271496660",
-    "firebase_url": "https://magzmotron-5ae93-default-rtdb.firebaseio.com",
-    "project_id": "magzmotron-5ae93",
-    "storage_bucket": "magzmotron-5ae93.firebasestorage.app"
+    "project_number": "323935471456",
+    "project_id": "phepha-mv-isdp",
+    "storage_bucket": "phepha-mv-isdp.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:1091271496660:android:b2ac0e04a4735ffdb53c41",
-        "android_client_info": {
-          "package_name": "com.example.magzmotron"
-        }
-      },
-      "oauth_client": [],
-      "api_key": [
-        {
-          "current_key": "AIzaSyD0pYM5_xXEaYhtRqzi4vpPAGhNDVEBKYA"
-        }
-      ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": []
-        }
-      }
-    },
-    {
-      "client_info": {
-        "mobilesdk_app_id": "1:1091271496660:android:b113cf2932595127b53c41",
+        "mobilesdk_app_id": "1:323935471456:android:baba6da1df97578388c005",
         "android_client_info": {
           "package_name": "za.co.phephamv.isdp"
         }
@@ -35,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyD0pYM5_xXEaYhtRqzi4vpPAGhNDVEBKYA"
+          "current_key": "AIzaSyDYthovKfVp5WkDEeAqPNjNuI9a_kDhgBo"
         }
       ],
       "services": {
