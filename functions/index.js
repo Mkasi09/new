@@ -394,6 +394,17 @@ async function sendToFirebaseTokens(tokens, message) {
           defaultVibrateTimings: true,
         },
       },
+      apns: {
+        headers: {
+          "apns-priority": "10",
+        },
+        payload: {
+          aps: {
+            sound: "default",
+            contentAvailable: true,
+          },
+        },
+      },
     });
     successCount += response.successCount;
     failureCount += response.failureCount;

@@ -133,7 +133,11 @@ class FirebaseIsdpRepository implements IsdpRepository {
         }, onError: controller.addError);
         unawaited(
           _loadCachedWorkOrders().then((cached) {
-            if (!hasLiveData && cached.isNotEmpty && !controller.isClosed) {
+            // An empty cache is still a complete local result. Emit it so the
+            // UI can show its zero-jobs state while Firestore continues to
+            // connect; otherwise a delayed query leaves the screen loading
+            // indefinitely.
+            if (!hasLiveData && !controller.isClosed) {
               controller.add(cached);
             }
           }),
