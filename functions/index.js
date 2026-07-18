@@ -89,8 +89,7 @@ exports.createUser = onCall({ secrets: smtpSecrets }, async (request) => {
 });
 
 function assertSmtpConfigured() {
-  if (!cleanString(smtpHost.value()) || !cleanString(smtpFrom.value()) ||
-      !cleanString(smtpUser.value()) || !cleanString(smtpPass.value())) {
+  if (!isSmtpConfigured()) {
     throw new HttpsError(
       "failed-precondition",
       "Email delivery is not configured. Set SMTP_HOST, SMTP_FROM, SMTP_USER, and SMTP_PASS.",
@@ -98,9 +97,14 @@ function assertSmtpConfigured() {
   }
 }
 
-async function sendNewUserEmail({ email, name, role, temporaryPassword }) {
+function isSmtpConfigured() {
+  return Boolean(cleanString(smtpHost.value()) && cleanString(smtpFrom.value()) &&
+    cleanString(smtpUser.value()) && cleanString(smtpPass.value()));
+}
+
+function createSmtpTransporter() {
   const port = Number.parseInt(cleanString(smtpPort.value()) || "587", 10);
-  const transporter = nodemailer.createTransport({
+  return nodemailer.createTransport({
     host: cleanString(smtpHost.value()),
     port: Number.isFinite(port) ? port : 587,
     secure: smtpSecure.value() === "true" || port === 465,
@@ -109,6 +113,10 @@ async function sendNewUserEmail({ email, name, role, temporaryPassword }) {
       pass: cleanString(smtpPass.value()),
     },
   });
+}
+
+async function sendNewUserEmail({ email, name, role, temporaryPassword }) {
+  const transporter = createSmtpTransporter();
   const safeName = cleanString(name) || "ISDP User";
   const subject = "Your PHEPHA MV ISDP account";
   const text = [
@@ -145,48 +153,158 @@ function emailHtml({ safeName, email, role, temporaryPassword }) {
   `;
 }
 
+async function sendAssignmentEmails(db, orderId, before, after) {
+  if (!isSmtpConfigured()) {
+    console.warn("Assignment email skipped because SMTP is not configured.", { orderId });
+    return;
+  }
+
+  const assignments = assignmentEmailTargets(before, after);
+  if (assignments.length === 0) return;
+
+  const userDocs = await db.getAll(
+    ...assignments.map((assignment) => db.collection("users").doc(assignment.userId)),
+  );
+  const usersById = new Map(userDocs.filter((doc) => doc.exists).map((doc) => [doc.id, doc.data()]));
+  const messages = assignments
+    .map((assignment) => {
+      const user = usersById.get(assignment.userId);
+      const email = cleanString(user?.email);
+      if (!email.includes("@")) return null;
+      return assignmentEmailMessage({
+        orderId,
+        order: after,
+        assignment,
+        user,
+        email,
+      });
+    })
+    .filter(Boolean);
+
+  if (messages.length === 0) return;
+
+  const transporter = createSmtpTransporter();
+  const results = await Promise.allSettled(
+    messages.map((message) => transporter.sendMail(message)),
+  );
+  const failures = results.filter((result) => result.status === "rejected");
+  if (failures.length > 0) {
+    console.warn("Some assignment emails failed", {
+      orderId,
+      sent: results.length - failures.length,
+      failed: failures.length,
+      errors: failures.map((failure) => failure.reason?.message || String(failure.reason)),
+    });
+  } else {
+    console.log("Assignment emails sent", { orderId, sent: results.length });
+  }
+}
+
+function assignmentEmailTargets(before, after) {
+  const targets = [];
+  const beforeSupervisorId = cleanString(before?.supervisorId);
+  const afterSupervisorId = cleanString(after.supervisorId);
+  if (afterSupervisorId && afterSupervisorId !== beforeSupervisorId) {
+    targets.push({ userId: afterSupervisorId, role: "supervisor" });
+  }
+
+  const beforeTechnicianIds = new Set(arrayStrings(before?.assignedTechnicianIds));
+  for (const technicianId of arrayStrings(after.assignedTechnicianIds)) {
+    if (!beforeTechnicianIds.has(technicianId)) {
+      targets.push({ userId: technicianId, role: "technician" });
+    }
+  }
+
+  return Array.from(new Map(targets.map((target) => [target.userId, target])).values());
+}
+
+function assignmentEmailMessage({ orderId, order, assignment, user, email }) {
+  const name = cleanString(user?.name) || "ISDP User";
+  const site = cleanString(order.site) || orderId;
+  const roleLabel = assignment.role === "supervisor" ? "supervisor" : "technician";
+  const subject = `Job assigned: ${site}`;
+  const details = [
+    `Job ID: ${orderId}`,
+    `Site: ${site}`,
+    cleanString(order.address) ? `Address: ${cleanString(order.address)}` : null,
+    cleanString(order.scope) ? `Scope: ${cleanString(order.scope)}` : null,
+    cleanString(order.priority) ? `Priority: ${cleanString(order.priority)}` : null,
+    cleanString(order.status) ? `Status: ${cleanString(order.status)}` : null,
+  ].filter(Boolean);
+  const text = [
+    `Hello ${name},`,
+    "",
+    `You have been assigned as ${roleLabel} for this PHEPHA MV ISDP job.`,
+    "",
+    ...details,
+    "",
+    "Please open the ISDP app to review the job.",
+  ].join("\n");
+
+  return {
+    from: cleanString(smtpFrom.value()),
+    to: email,
+    subject,
+    text,
+    html: assignmentEmailHtml({ name, roleLabel, details }),
+  };
+}
+
+function assignmentEmailHtml({ name, roleLabel, details }) {
+  return `
+    <p>Hello ${escapeHtml(name)},</p>
+    <p>You have been assigned as ${escapeHtml(roleLabel)} for this PHEPHA MV ISDP job.</p>
+    <ul>
+      ${details.map((detail) => `<li>${escapeHtml(detail)}</li>`).join("")}
+    </ul>
+    <p>Please open the ISDP app to review the job.</p>
+  `;
+}
+
 exports.notifyWorkOrderUpdate = onDocumentWritten(
   {
     document: "work_orders/{orderId}",
-    secrets: huaweiSecrets,
+    secrets: [...huaweiSecrets, ...smtpSecrets],
   },
   async (event) => {
     const before = event.data?.before.exists ? event.data.before.data() : null;
     const after = event.data?.after.exists ? event.data.after.data() : null;
     if (!after) return;
 
-    const notification = notificationForWorkOrder(event.params.orderId, before, after);
-    if (!notification) return;
-
     const db = getFirestore();
-    const recipients = await usersForAudience(db, notification.audience, after);
-    const tokens = tokensForUsers(recipients);
-    console.log("notifyWorkOrderUpdate", {
-      orderId: event.params.orderId,
-      type: notification.type,
-      audience: notification.audience,
-      recipients: recipients.length,
-      fcmTokens: tokens.fcm.length,
-      hmsTokens: tokens.hms.length,
-    });
-    if (tokens.fcm.length === 0 && tokens.hms.length === 0) return;
+    await sendAssignmentEmails(db, event.params.orderId, before, after);
 
-    const result = await sendToTokens(tokens, {
-      notification: {
-        title: notification.title,
-        body: notification.body,
-      },
-      data: {
-        workOrderId: event.params.orderId,
+    const notification = notificationForWorkOrder(event.params.orderId, before, after);
+    if (notification) {
+      const recipients = await usersForAudience(db, notification.audience, after);
+      const tokens = tokensForUsers(recipients);
+      console.log("notifyWorkOrderUpdate", {
+        orderId: event.params.orderId,
         type: notification.type,
-        status: cleanString(after.status),
-      },
-    });
-    console.log("notifyWorkOrderUpdate sent", {
-      orderId: event.params.orderId,
-      successCount: result.successCount,
-      failureCount: result.failureCount,
-    });
+        audience: notification.audience,
+        recipients: recipients.length,
+        fcmTokens: tokens.fcm.length,
+        hmsTokens: tokens.hms.length,
+      });
+      if (tokens.fcm.length === 0 && tokens.hms.length === 0) return;
+
+      const result = await sendToTokens(tokens, {
+        notification: {
+          title: notification.title,
+          body: notification.body,
+        },
+        data: {
+          workOrderId: event.params.orderId,
+          type: notification.type,
+          status: cleanString(after.status),
+        },
+      });
+      console.log("notifyWorkOrderUpdate sent", {
+        orderId: event.params.orderId,
+        successCount: result.successCount,
+        failureCount: result.failureCount,
+      });
+    }
   },
 );
 
@@ -586,6 +704,8 @@ function stringValues(data) {
 function assignedTechniciansChanged(before, after) {
   return JSON.stringify(before.assignedTechnicians || []) !==
     JSON.stringify(after.assignedTechnicians || []) ||
+    JSON.stringify(arrayStrings(before.assignedTechnicianIds)) !==
+    JSON.stringify(arrayStrings(after.assignedTechnicianIds)) ||
     cleanString(before.assignedTo) !== cleanString(after.assignedTo);
 }
 
@@ -598,6 +718,10 @@ function evidenceChanged(before, after) {
 
 function cleanString(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function arrayStrings(value) {
+  return Array.isArray(value) ? value.map(cleanString).filter(Boolean) : [];
 }
 
 function escapeHtml(value) {

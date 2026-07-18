@@ -1,8 +1,10 @@
 # ISDP Cloud Functions
 
-## New user email delivery
+## Email delivery
 
 The `createUser` callable sends the new user's temporary password by SMTP.
+The `notifyWorkOrderUpdate` trigger also emails users when they are newly
+assigned to a job as the supervisor or technician.
 Set non-secret params in `functions/.env` before deploying:
 
 ```ini
