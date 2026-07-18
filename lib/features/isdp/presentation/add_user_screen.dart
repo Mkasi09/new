@@ -7,6 +7,8 @@ import '../../../core/support/support_contact.dart';
 import '../../auth/domain/auth_repository.dart';
 import 'widgets/form_scaffold.dart';
 
+const defaultTemporaryPassword = 'PHEPHA MV';
+
 class AddUserScreen extends StatefulWidget {
   const AddUserScreen({
     super.key,
@@ -34,7 +36,7 @@ class _AddUserScreenState extends State<AddUserScreen> {
   @override
   void initState() {
     super.initState();
-    _passwordController.text = _temporaryPassword();
+    _passwordController.text = defaultTemporaryPassword;
   }
 
   @override
@@ -67,6 +69,8 @@ class _AddUserScreenState extends State<AddUserScreen> {
         'permission-denied' => 'Only administrators can create users.',
         'unauthenticated' => 'Sign in before creating users.',
         'invalid-argument' => 'Check the user details and try again.',
+        'failed-precondition' =>
+          'Email delivery is not configured. Ask IT to set up SMTP before creating users.',
         _ => 'Could not create the user.',
       };
       _showError(withSupportContact(message));
@@ -96,7 +100,7 @@ class _AddUserScreenState extends State<AddUserScreen> {
                         icon: Icons.person_add_alt_1_outlined,
                         title: 'Add User',
                         subtitle:
-                            'Create an account with a temporary password. The user must replace it at first sign-in.',
+                            'Create an account with the required default password: "$defaultTemporaryPassword". The user must replace it at first sign-in.',
                       ),
                       const SizedBox(height: 14),
                       Card(
@@ -162,11 +166,22 @@ class _AddUserScreenState extends State<AddUserScreen> {
                                 ),
                               ),
                               const SizedBox(height: 12),
+                              const Align(
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  'Admin notice: default password is "$defaultTemporaryPassword".',
+                                  style: TextStyle(fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
                               TextFormField(
                                 controller: _passwordController,
+                                readOnly: true,
                                 obscureText: _obscurePassword,
                                 decoration: InputDecoration(
-                                  labelText: 'Temporary password',
+                                  labelText: 'Default password for new users',
+                                  helperText:
+                                      'Tell the admin clearly: every new user starts with "$defaultTemporaryPassword".',
                                   prefixIcon: const Icon(Icons.password),
                                   suffixIcon: IconButton(
                                     onPressed: () => setState(
@@ -230,9 +245,20 @@ class _AddUserScreenState extends State<AddUserScreen> {
             ),
             const SizedBox(height: 8),
             const Text('The user must change it after signing in.'),
+            const SizedBox(height: 8),
+            const Text(
+              'The user has been emailed this password automatically.',
+            ),
           ],
         ),
         actions: [
+          TextButton.icon(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: _newUserEmailMessage()));
+            },
+            icon: const Icon(Icons.email_outlined),
+            label: const Text('Copy Email Message'),
+          ),
           TextButton.icon(
             onPressed: () {
               Clipboard.setData(ClipboardData(text: _passwordController.text));
@@ -249,15 +275,26 @@ class _AddUserScreenState extends State<AddUserScreen> {
     );
   }
 
+  String _newUserEmailMessage() {
+    final name = _nameController.text.trim();
+    final greeting = name.isEmpty ? 'Hello' : 'Hello $name';
+    return '''
+$greeting,
+
+Your PHEPHA MV ISDP account has been created.
+
+Email: ${_emailController.text.trim()}
+Temporary password: ${_passwordController.text}
+
+Please sign in and change this password immediately.
+'''
+        .trim();
+  }
+
   void _showError(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  String _temporaryPassword() {
-    final value = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
-    return 'Isdp#${value.substring(value.length - 8)}A1';
   }
 }

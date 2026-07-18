@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image/image.dart' as img;
 import 'package:isdp/app/isdp_app.dart';
 import 'package:isdp/core/domain/app_role.dart';
@@ -10,6 +11,7 @@ import 'package:isdp/features/isdp/domain/entities.dart';
 import 'package:isdp/features/isdp/domain/isdp_repository.dart';
 import 'package:isdp/features/isdp/presentation/assign_technician_screen.dart';
 import 'package:isdp/features/isdp/presentation/analytics_view.dart';
+import 'package:isdp/features/isdp/presentation/add_user_screen.dart';
 import 'package:isdp/features/isdp/presentation/isdp_shell.dart';
 import 'package:isdp/features/isdp/presentation/job_chats_screen.dart';
 import 'package:isdp/features/isdp/presentation/completion_details_screen.dart';
@@ -57,6 +59,34 @@ void main() {
     expect(decodeSignature(encoded), const [
       [Offset(0.1, 0.2), Offset(0.8, 0.7)],
     ]);
+  });
+
+  testWidgets('add user uses the required default password', (tester) async {
+    final authRepository = _TestAuthRepository();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AddUserScreen(authRepository: authRepository, onClose: () {}),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining(defaultTemporaryPassword), findsWidgets);
+    expect(find.textContaining('required default password'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextFormField).at(0), 'Test User');
+    await tester.enterText(
+      find.byType(TextFormField).at(1),
+      'test.user@example.com',
+    );
+    await tester.tap(find.text('Create User'));
+    await tester.pumpAndSettle();
+
+    expect(authRepository.createdTemporaryPassword, defaultTemporaryPassword);
+    expect(find.text('User created'), findsOneWidget);
+    expect(find.textContaining(defaultTemporaryPassword), findsWidgets);
   });
 
   testWidgets('full-screen signature paints while drawing', (tester) async {
@@ -490,6 +520,66 @@ mixin _RepositoryTestStubs {
   Future<void> markSupportMessagesRead() async {}
 
   Future<void> clearLocalCache() async {}
+}
+
+class _TestAuthRepository implements AuthRepository {
+  String? createdName;
+  String? createdEmail;
+  String? createdTemporaryPassword;
+  AppRole? createdRole;
+  String? createdTeam;
+
+  @override
+  Stream<User?> authStateChanges() => const Stream.empty();
+
+  @override
+  Future<void> changePassword(String newPassword) async {}
+
+  @override
+  Future<void> changePasswordWithCurrentPassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {}
+
+  @override
+  Future<void> createUser({
+    required String name,
+    required String email,
+    required String temporaryPassword,
+    required AppRole role,
+    String? team,
+  }) async {
+    createdName = name;
+    createdEmail = email;
+    createdTemporaryPassword = temporaryPassword;
+    createdRole = role;
+    createdTeam = team;
+  }
+
+  @override
+  Future<AppUserProfile> currentUserProfile() async {
+    return const AppUserProfile(
+      uid: 'admin',
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: AppRole.admin,
+    );
+  }
+
+  @override
+  Future<List<AppUserProfile>> listUsers() async => const [];
+
+  @override
+  Future<void> sendPasswordResetEmail(String email) async {}
+
+  @override
+  Future<void> signIn({
+    required String email,
+    required String password,
+  }) async {}
+
+  @override
+  Future<void> signOut() async {}
 }
 
 class _TestIsdpRepository with _RepositoryTestStubs implements IsdpRepository {

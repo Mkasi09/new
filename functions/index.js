@@ -6,6 +6,7 @@ const { FieldValue, getFirestore } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 const { defineSecret, defineString } = require("firebase-functions/params");
 const { setGlobalOptions } = require("firebase-functions/v2/options");
+const nodemailer = require("nodemailer");
 const { huaweiPushUrl } = require("./huawei_push");
 
 setGlobalOptions({ region: "africa-south1" });
@@ -14,8 +15,16 @@ initializeApp();
 const huaweiAppId = defineString("HUAWEI_APP_ID");
 const huaweiClientSecret = defineSecret("HUAWEI_CLIENT_SECRET");
 const huaweiSecrets = [huaweiClientSecret];
+const smtpHost = defineString("SMTP_HOST");
+const smtpPort = defineString("SMTP_PORT", { default: "587" });
+const smtpSecure = defineString("SMTP_SECURE", { default: "false" });
+const smtpFrom = defineString("SMTP_FROM");
+const smtpUser = defineSecret("SMTP_USER");
+const smtpPass = defineSecret("SMTP_PASS");
+const smtpSecrets = [smtpUser, smtpPass];
+const DEFAULT_TEMPORARY_PASSWORD = "PHEPHA MV";
 
-exports.createUser = onCall(async (request) => {
+exports.createUser = onCall({ secrets: smtpSecrets }, async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Sign in before creating users.");
   }
@@ -29,25 +38,22 @@ exports.createUser = onCall(async (request) => {
 
   const name = cleanString(request.data.name);
   const email = cleanString(request.data.email).toLowerCase();
-  const temporaryPassword = String(request.data.temporaryPassword || "");
   const role = cleanString(request.data.role);
   const team = cleanString(request.data.team);
 
   if (!name || !email.includes("@")) {
     throw new HttpsError("invalid-argument", "A valid name and email are required.");
   }
-  if (temporaryPassword.length < 8) {
-    throw new HttpsError("invalid-argument", "The temporary password is too short.");
-  }
   if (!["admin", "supervisor", "technician"].includes(role)) {
     throw new HttpsError("invalid-argument", "Select a valid user role.");
   }
+  assertSmtpConfigured();
 
   let user;
   try {
     user = await getAuth().createUser({
       email,
-      password: temporaryPassword,
+      password: DEFAULT_TEMPORARY_PASSWORD,
       displayName: name,
       emailVerified: false,
     });
@@ -62,7 +68,13 @@ exports.createUser = onCall(async (request) => {
       createdBy: request.auth.uid,
     });
     await getAuth().setCustomUserClaims(user.uid, { role });
-    return { uid: user.uid };
+    await sendNewUserEmail({
+      email,
+      name,
+      role,
+      temporaryPassword: DEFAULT_TEMPORARY_PASSWORD,
+    });
+    return { uid: user.uid, emailSent: true };
   } catch (error) {
     if (user) {
       await db.collection("users").doc(user.uid).delete().catch(() => undefined);
@@ -75,6 +87,63 @@ exports.createUser = onCall(async (request) => {
     throw new HttpsError("internal", "The user could not be created.");
   }
 });
+
+function assertSmtpConfigured() {
+  if (!cleanString(smtpHost.value()) || !cleanString(smtpFrom.value()) ||
+      !cleanString(smtpUser.value()) || !cleanString(smtpPass.value())) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Email delivery is not configured. Set SMTP_HOST, SMTP_FROM, SMTP_USER, and SMTP_PASS.",
+    );
+  }
+}
+
+async function sendNewUserEmail({ email, name, role, temporaryPassword }) {
+  const port = Number.parseInt(cleanString(smtpPort.value()) || "587", 10);
+  const transporter = nodemailer.createTransport({
+    host: cleanString(smtpHost.value()),
+    port: Number.isFinite(port) ? port : 587,
+    secure: smtpSecure.value() === "true" || port === 465,
+    auth: {
+      user: cleanString(smtpUser.value()),
+      pass: cleanString(smtpPass.value()),
+    },
+  });
+  const safeName = cleanString(name) || "ISDP User";
+  const subject = "Your PHEPHA MV ISDP account";
+  const text = [
+    `Hello ${safeName},`,
+    "",
+    "Your PHEPHA MV ISDP account has been created.",
+    "",
+    `Email: ${email}`,
+    `Temporary password: ${temporaryPassword}`,
+    `Role: ${role}`,
+    "",
+    "Please sign in and change this password immediately.",
+  ].join("\n");
+
+  await transporter.sendMail({
+    from: cleanString(smtpFrom.value()),
+    to: email,
+    subject,
+    text,
+    html: emailHtml({ safeName, email, role, temporaryPassword }),
+  });
+}
+
+function emailHtml({ safeName, email, role, temporaryPassword }) {
+  return `
+    <p>Hello ${escapeHtml(safeName)},</p>
+    <p>Your PHEPHA MV ISDP account has been created.</p>
+    <p>
+      <strong>Email:</strong> ${escapeHtml(email)}<br>
+      <strong>Temporary password:</strong> ${escapeHtml(temporaryPassword)}<br>
+      <strong>Role:</strong> ${escapeHtml(role)}
+    </p>
+    <p>Please sign in and change this password immediately.</p>
+  `;
+}
 
 exports.notifyWorkOrderUpdate = onDocumentWritten(
   {
@@ -529,4 +598,13 @@ function evidenceChanged(before, after) {
 
 function cleanString(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function escapeHtml(value) {
+  return cleanString(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
