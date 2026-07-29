@@ -3,8 +3,9 @@
 ## Email delivery
 
 The `createUser` callable sends the new user's temporary password by SMTP.
-The `notifyWorkOrderUpdate` trigger also emails users when they are newly
-assigned to a job as the supervisor or technician.
+The `notifyWorkOrderUpdate` trigger emails active supervisors as soon as a new
+job enters the supervisor queue, before it is accepted. It also emails
+technicians when they are newly assigned to a job.
 Set non-secret params in `functions/.env` before deploying:
 
 ```ini

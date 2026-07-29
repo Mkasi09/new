@@ -159,10 +159,27 @@ async function sendAssignmentEmails(db, orderId, before, after) {
     return;
   }
 
-  const assignments = assignmentEmailTargets(before, after);
+  let assignments = assignmentEmailTargets(before, after);
+  let userDocs;
+
+  // New jobs are placed in a shared supervisor queue, so there is no
+  // supervisorId until somebody accepts one. Notify the supervisors while the
+  // job is still awaiting acceptance instead of emailing the accepting
+  // supervisor after the fact.
+  if (!before && cleanString(after.status) === "Assigned to Supervisor") {
+    const supervisors = await db.collection("users")
+      .where("role", "==", "supervisor")
+      .get();
+    userDocs = supervisors.docs.filter((doc) => doc.data()?.disabled !== true);
+    assignments = userDocs.map((doc) => ({
+      userId: doc.id,
+      role: "supervisor",
+    }));
+  }
+
   if (assignments.length === 0) return;
 
-  const userDocs = await db.getAll(
+  userDocs ??= await db.getAll(
     ...assignments.map((assignment) => db.collection("users").doc(assignment.userId)),
   );
   const usersById = new Map(userDocs.filter((doc) => doc.exists).map((doc) => [doc.id, doc.data()]));
@@ -204,7 +221,9 @@ function assignmentEmailTargets(before, after) {
   const targets = [];
   const beforeSupervisorId = cleanString(before?.supervisorId);
   const afterSupervisorId = cleanString(after.supervisorId);
-  if (afterSupervisorId && afterSupervisorId !== beforeSupervisorId) {
+  if (cleanString(after.status) === "Assigned to Supervisor" &&
+      afterSupervisorId &&
+      afterSupervisorId !== beforeSupervisorId) {
     targets.push({ userId: afterSupervisorId, role: "supervisor" });
   }
 
