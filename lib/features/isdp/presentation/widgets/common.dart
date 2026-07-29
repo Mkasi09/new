@@ -189,28 +189,40 @@ class UnreadCountBadge extends StatelessWidget {
 }
 
 class InfoChip extends StatelessWidget {
-  const InfoChip({super.key, required this.icon, required this.label});
+  const InfoChip({
+    super.key,
+    required this.icon,
+    required this.label,
+    this.color,
+  });
 
   final IconData icon;
   final String label;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
       decoration: BoxDecoration(
-        color: const Color(0xFFF0F3F7),
+        color: (color ?? AppTheme.muted).withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(
+          color: (color ?? AppTheme.muted).withValues(alpha: 0.2),
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 15, color: AppTheme.muted),
+          Icon(icon, size: 15, color: color ?? AppTheme.muted),
           const SizedBox(width: 5),
           Text(
             label,
-            style: const TextStyle(fontSize: 12, color: AppTheme.muted),
+            style: TextStyle(
+              fontSize: 12,
+              color: color ?? AppTheme.muted,
+              fontWeight: color == null ? FontWeight.normal : FontWeight.w800,
+            ),
           ),
         ],
       ),
@@ -322,6 +334,14 @@ class JobOverviewPanel extends StatelessWidget {
             runSpacing: 8,
             children: [
               InfoChip(icon: Icons.schedule_outlined, label: order.sla),
+              if (workOrderSlaAlert(order) case final alert?)
+                InfoChip(
+                  icon: alert.overdue
+                      ? Icons.error_outline
+                      : Icons.notifications_active_outlined,
+                  label: alert.label,
+                  color: alert.overdue ? AppTheme.danger : AppTheme.warning,
+                ),
               InfoChip(icon: Icons.badge_outlined, label: order.siteCode),
               InfoChip(icon: Icons.priority_high, label: order.priority.label),
               if (order.supervisor != null)
@@ -530,6 +550,16 @@ class WorkOrderCard extends StatelessWidget {
                           label: workOrderStageLabel(order),
                         ),
                         InfoChip(icon: Icons.schedule, label: order.sla),
+                        if (workOrderSlaAlert(order) case final alert?)
+                          InfoChip(
+                            icon: alert.overdue
+                                ? Icons.error_outline
+                                : Icons.notifications_active_outlined,
+                            label: alert.label,
+                            color: alert.overdue
+                                ? AppTheme.danger
+                                : AppTheme.warning,
+                          ),
                         InfoChip(
                           icon: Icons.priority_high,
                           label: order.priority.label,
@@ -566,6 +596,38 @@ Color priorityColor(Priority priority) {
     case Priority.low:
       return AppTheme.secondary;
   }
+}
+
+class WorkOrderSlaAlert {
+  const WorkOrderSlaAlert({required this.label, required this.overdue});
+
+  final String label;
+  final bool overdue;
+}
+
+WorkOrderSlaAlert? workOrderSlaAlert(WorkOrder order, {DateTime? now}) {
+  if (!order.isOpen ||
+      order.status == 'Approved' ||
+      order.status == 'Closed' ||
+      order.status == 'Declined - Closed') {
+    return null;
+  }
+  final dueAt = order.dueAt;
+  if (dueAt == null) return null;
+  final remaining = dueAt.difference(now ?? DateTime.now());
+  if (remaining.isNegative || remaining == Duration.zero) {
+    return const WorkOrderSlaAlert(label: 'SLA overdue', overdue: true);
+  }
+  if (remaining <= const Duration(hours: 2)) {
+    final minutes = remaining.inMinutes.clamp(1, 120);
+    return WorkOrderSlaAlert(
+      label: minutes >= 60
+          ? 'SLA due in ${minutes ~/ 60}h ${minutes % 60}m'
+          : 'SLA due in ${minutes}m',
+      overdue: false,
+    );
+  }
+  return null;
 }
 
 double workOrderProgress(WorkOrder order) {

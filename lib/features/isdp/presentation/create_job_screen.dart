@@ -1,11 +1,18 @@
 import 'package:flutter/material.dart';
 
+import '../../auth/domain/auth_repository.dart';
 import '../domain/entities.dart';
 import 'widgets/form_scaffold.dart';
 
 class CreateJobScreen extends StatefulWidget {
-  const CreateJobScreen({super.key, this.onCreated, this.onCancel});
+  const CreateJobScreen({
+    super.key,
+    this.supervisors = const [],
+    this.onCreated,
+    this.onCancel,
+  });
 
+  final List<AppUserProfile> supervisors;
   final Future<void> Function(WorkOrder)? onCreated;
   final VoidCallback? onCancel;
 
@@ -20,6 +27,7 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
   late DateTime _dueAt = DateTime.now().add(const Duration(days: 1));
   late final int _draftNumber = DateTime.now().microsecondsSinceEpoch;
   Priority _priority = Priority.high;
+  AppUserProfile? _supervisor;
   bool _creating = false;
 
   @override
@@ -127,6 +135,42 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
                                 }
                               },
                             ),
+                            const SizedBox(height: 12),
+                            DropdownButtonFormField<String>(
+                              initialValue: _supervisor?.uid,
+                              decoration: const InputDecoration(
+                                labelText: 'Assign supervisor',
+                                helperText:
+                                    'Choose who must review and accept this job.',
+                                prefixIcon: Icon(
+                                  Icons.supervisor_account_outlined,
+                                ),
+                              ),
+                              items: [
+                                const DropdownMenuItem<String>(
+                                  value: null,
+                                  child: Text('Shared supervisor queue'),
+                                ),
+                                ...widget.supervisors.map(
+                                  (supervisor) => DropdownMenuItem<String>(
+                                    value: supervisor.uid,
+                                    child: Text(
+                                      '${supervisor.name} (${supervisor.email})',
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                              onChanged: (uid) {
+                                setState(() {
+                                  _supervisor = uid == null
+                                      ? null
+                                      : widget.supervisors.firstWhere(
+                                          (user) => user.uid == uid,
+                                        );
+                                });
+                              },
+                            ),
                           ],
                         ),
                       ),
@@ -179,6 +223,8 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
       status: 'Assigned to Supervisor',
       priority: _priority,
       dueAt: _dueAt,
+      supervisor: _supervisor?.name,
+      supervisorId: _supervisor?.uid,
     );
     final onCreated = widget.onCreated;
     if (onCreated != null) {

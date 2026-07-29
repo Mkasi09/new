@@ -6,6 +6,14 @@ The `createUser` callable sends the new user's temporary password by SMTP.
 The `notifyWorkOrderUpdate` trigger emails active supervisors as soon as a new
 job enters the supervisor queue, before it is accepted. It also emails
 technicians when they are newly assigned to a job.
+
+The scheduled `monitorWorkOrderSla` function runs every 15 minutes. It:
+
+- reminds the assigned supervisor when a job has waited 12 hours for
+  acceptance, repeating every 12 hours for up to three days;
+- warns the assigned supervisor when an open job is due within two hours; and
+- escalates an overdue open job to active administrators once.
+
 Set non-secret params in `functions/.env` before deploying:
 
 ```ini

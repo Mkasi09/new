@@ -97,6 +97,7 @@ class _IsdpShellState extends State<IsdpShell> {
   final Set<String> _pendingCreateIds = {};
   final List<_NavigationSnapshot> _navigationHistory = [];
   List<AppUserProfile> _technicians = const [];
+  List<AppUserProfile> _supervisors = const [];
   bool _notificationsInitialized = false;
   StreamSubscription<String>? _notificationOpenSubscription;
   String? _pendingChatOrderId;
@@ -486,10 +487,16 @@ class _IsdpShellState extends State<IsdpShell> {
         _technicians = users
             .where((user) => user.role == AppRole.technician)
             .toList();
+        _supervisors = users
+            .where((user) => user.role == AppRole.supervisor)
+            .toList();
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _technicians = const []);
+      setState(() {
+        _technicians = const [];
+        _supervisors = const [];
+      });
     }
   }
 
@@ -580,6 +587,7 @@ class _IsdpShellState extends State<IsdpShell> {
       ),
       _WorkflowView.supervisorJob => _buildSupervisorJobPage(visibleOrders),
       _WorkflowView.createJob => CreateJobScreen(
+        supervisors: _supervisors,
         onCreated: _createJob,
         onCancel: _navigateBack,
       ),

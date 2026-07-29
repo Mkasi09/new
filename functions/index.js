@@ -1,5 +1,6 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/firestore");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { initializeApp } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
 const { FieldValue, getFirestore } = require("firebase-admin/firestore");
@@ -166,7 +167,9 @@ async function sendAssignmentEmails(db, orderId, before, after) {
   // supervisorId until somebody accepts one. Notify the supervisors while the
   // job is still awaiting acceptance instead of emailing the accepting
   // supervisor after the fact.
-  if (!before && cleanString(after.status) === "Assigned to Supervisor") {
+  if (!before &&
+      cleanString(after.status) === "Assigned to Supervisor" &&
+      !cleanString(after.supervisorId)) {
     const supervisors = await db.collection("users")
       .where("role", "==", "supervisor")
       .get();
@@ -326,6 +329,162 @@ exports.notifyWorkOrderUpdate = onDocumentWritten(
     }
   },
 );
+
+exports.monitorWorkOrderSla = onSchedule(
+  {
+    region: "europe-west1",
+    schedule: "every 15 minutes",
+    timeZone: "Africa/Johannesburg",
+    secrets: [...huaweiSecrets, ...smtpSecrets],
+  },
+  async () => {
+    const db = getFirestore();
+    const now = new Date();
+    const openOrders = await db.collection("work_orders")
+      .where("isOpen", "==", true)
+      .get();
+
+    for (const orderDoc of openOrders.docs) {
+      const order = orderDoc.data();
+      const status = cleanString(order.status);
+      const createdAt = dateValue(order.createdAt);
+      const dueAt = dateValue(order.dueAt);
+
+      if (status === "Assigned to Supervisor" &&
+          createdAt &&
+          now.getTime() - createdAt.getTime() >= 12 * 60 * 60 * 1000 &&
+          now.getTime() - createdAt.getTime() <= 3 * 24 * 60 * 60 * 1000 &&
+          reminderIsDue(order.supervisorReminderAt, now, 12 * 60 * 60 * 1000)) {
+        const recipients = await supervisorRecipients(db, order);
+        await sendOperationalAlert({
+          db,
+          recipients,
+          orderId: orderDoc.id,
+          order,
+          type: "supervisor_acceptance_reminder",
+          title: "Job awaiting acceptance",
+          body: `${cleanString(order.site) || orderDoc.id} still needs supervisor acceptance.`,
+        });
+        await orderDoc.ref.update({
+          supervisorReminderAt: FieldValue.serverTimestamp(),
+        });
+      }
+
+      if (dueAt && dueAt.getTime() > now.getTime() &&
+          dueAt.getTime() - now.getTime() <= 2 * 60 * 60 * 1000 &&
+          !order.slaWarningAt) {
+        const recipients = await supervisorRecipients(db, order);
+        await sendOperationalAlert({
+          db,
+          recipients,
+          orderId: orderDoc.id,
+          order,
+          type: "sla_approaching",
+          title: "SLA deadline approaching",
+          body: `${cleanString(order.site) || orderDoc.id} is due within 2 hours.`,
+        });
+        await orderDoc.ref.update({
+          slaWarningAt: FieldValue.serverTimestamp(),
+        });
+      }
+
+      if (dueAt && dueAt.getTime() <= now.getTime() && !order.overdueEscalatedAt) {
+        const recipients = await activeUsersByRole(db, "admin");
+        await sendOperationalAlert({
+          db,
+          recipients,
+          orderId: orderDoc.id,
+          order,
+          type: "sla_overdue",
+          title: "SLA overdue",
+          body: `${cleanString(order.site) || orderDoc.id} has exceeded its SLA deadline.`,
+        });
+        await orderDoc.ref.update({
+          overdueEscalatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+    }
+  },
+);
+
+async function supervisorRecipients(db, order) {
+  const supervisorId = cleanString(order.supervisorId);
+  if (supervisorId) {
+    const supervisor = await db.collection("users").doc(supervisorId).get();
+    return supervisor.exists && supervisor.data()?.disabled !== true
+      ? [supervisor]
+      : [];
+  }
+  return activeUsersByRole(db, "supervisor");
+}
+
+async function activeUsersByRole(db, role) {
+  const snapshot = await db.collection("users").where("role", "==", role).get();
+  return snapshot.docs.filter((doc) => doc.data()?.disabled !== true);
+}
+
+async function sendOperationalAlert({
+  recipients,
+  orderId,
+  order,
+  type,
+  title,
+  body,
+}) {
+  if (recipients.length === 0) return;
+
+  const tokens = tokensForUsers(recipients);
+  if (tokens.fcm.length > 0 || tokens.hms.length > 0) {
+    await sendToTokens(tokens, {
+      notification: { title, body },
+      data: {
+        workOrderId: orderId,
+        type,
+        status: cleanString(order.status),
+      },
+    });
+  }
+
+  if (!isSmtpConfigured()) return;
+  const emails = recipients
+    .map((doc) => ({
+      email: cleanString(doc.data()?.email),
+      name: cleanString(doc.data()?.name) || "ISDP User",
+    }))
+    .filter((recipient) => recipient.email.includes("@"));
+  if (emails.length === 0) return;
+
+  const transporter = createSmtpTransporter();
+  await Promise.allSettled(
+    emails.map((recipient) => transporter.sendMail({
+      from: cleanString(smtpFrom.value()),
+      to: recipient.email,
+      subject: title,
+      text: `Hello ${recipient.name},\n\n${body}\n\nJob ID: ${orderId}\n\nPlease open the ISDP app for details.`,
+      html: `
+        <p>Hello ${escapeHtml(recipient.name)},</p>
+        <p>${escapeHtml(body)}</p>
+        <p><strong>Job ID:</strong> ${escapeHtml(orderId)}</p>
+        <p>Please open the ISDP app for details.</p>
+      `,
+    })),
+  );
+}
+
+function reminderIsDue(lastSentAt, now, intervalMs) {
+  const lastSent = dateValue(lastSentAt);
+  return !lastSent || now.getTime() - lastSent.getTime() >= intervalMs;
+}
+
+function dateValue(value) {
+  if (value instanceof Date) return value;
+  if (value && typeof value.toDate === "function") return value.toDate();
+  if (typeof value === "string") {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  return null;
+}
 
 exports.notifyJobChatMessage = onDocumentCreated(
   {
