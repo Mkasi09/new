@@ -70,7 +70,7 @@ class _AddUserScreenState extends State<AddUserScreen> {
         'unauthenticated' => 'Sign in before creating users.',
         'invalid-argument' => 'Check the user details and try again.',
         'failed-precondition' =>
-          'Email delivery is not configured. Ask IT to set up SMTP before creating users.',
+          'Email delivery is not ready yet. Ask IT to finish the email setup before creating users.',
         _ => 'Could not create the user.',
       };
       _showError(withSupportContact(message));

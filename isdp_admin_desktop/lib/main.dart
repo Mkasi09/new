@@ -270,6 +270,7 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
   var _section = AdminSection.dashboard;
   var _orders = <WorkOrder>[];
   var _invoices = <Invoice>[];
+  AdminNotice? _adminNotice;
   var _isLoading = true;
   var _isSyncing = false;
   String _search = '';
@@ -277,9 +278,11 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
   WorkOrder? _selectedOrder;
   WorkOrder? _selectedChatOrder;
   final List<_AdminNotification> _notifications = [];
+  var _users = <AdminUserProfile>[];
   var _technicians = <AdminUserProfile>[];
   var _isFetching = false;
   var _isFetchingInvoices = false;
+  var _isFetchingUsers = false;
   var _refreshQueued = false;
   Timer? _poller;
 
@@ -288,7 +291,8 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
     super.initState();
     _loadOrders();
     _loadInvoices();
-    _loadTechnicians();
+    _loadUsers();
+    _loadAdminNotice();
     _poller = Timer.periodic(const Duration(seconds: 5), (_) {
       _loadOrders();
       _loadInvoices();
@@ -407,6 +411,12 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
         onViewProfile: _showTechnicianProfile,
         onChangeTeam: _changeTechnicianTeam,
       ),
+      AdminSection.users => UsersManagementView(
+        users: _users,
+        onCreate: _createUserProfile,
+        onEdit: _editUserProfile,
+        onDelete: _confirmDeleteUserProfile,
+      ),
       AdminSection.acceptance => AcceptanceView(
         orders: _orders,
         onApprove: (order) => _performAction(order, OrderAction.approve),
@@ -418,6 +428,12 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
         session: widget.session,
         onSave: _saveInvoice,
         onOpen: _openOrder,
+      ),
+      AdminSection.adminTools => AdminToolsView(
+        orders: _orders,
+        users: _users,
+        notice: _adminNotice,
+        onSaveNotice: _saveAdminNotice,
       ),
       AdminSection.analytics => AnalyticsView(orders: _orders),
     };
@@ -515,6 +531,8 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
   void _refreshAll() {
     unawaited(_loadOrders());
     unawaited(_loadInvoices());
+    unawaited(_loadUsers());
+    unawaited(_loadAdminNotice());
   }
 
   Future<void> _loadInvoices() async {
@@ -543,16 +561,36 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
     });
   }
 
-  Future<void> _loadTechnicians() async {
+  Future<void> _loadUsers() async {
+    if (_isFetchingUsers) return;
+    _isFetchingUsers = true;
     try {
-      final technicians = await widget.repository.fetchTechnicians(
-        widget.session,
-      );
+      final users = await widget.repository.fetchUsers(widget.session);
       if (!mounted) return;
-      setState(() => _technicians = technicians);
+      setState(() {
+        _users = users;
+        _technicians = users
+            .where((user) => user.role == AdminUserRole.technician.value)
+            .toList();
+      });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _technicians = const []);
+      setState(() {
+        _users = const [];
+        _technicians = const [];
+      });
+    } finally {
+      _isFetchingUsers = false;
+    }
+  }
+
+  Future<void> _loadAdminNotice() async {
+    try {
+      final notice = await widget.repository.fetchAdminNotice(widget.session);
+      if (!mounted) return;
+      setState(() => _adminNotice = notice);
+    } catch (_) {
+      // Keep the previous notice visible when a background refresh fails.
     }
   }
 
@@ -775,6 +813,106 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
     );
   }
 
+  Future<void> _createUserProfile() async {
+    final profile = await showDialog<AdminUserProfile>(
+      context: context,
+      builder: (context) => const UserProfileDialog(),
+    );
+    if (profile == null) return;
+
+    await _runUserMutation(
+      () => widget.repository.saveUserProfile(widget.session, profile),
+      success: '${profile.name} added to users.',
+    );
+  }
+
+  Future<void> _editUserProfile(AdminUserProfile user) async {
+    final profile = await showDialog<AdminUserProfile>(
+      context: context,
+      builder: (context) => UserProfileDialog(user: user),
+    );
+    if (profile == null) return;
+
+    await _runUserMutation(
+      () => widget.repository.saveUserProfile(widget.session, profile),
+      success: '${profile.name} updated.',
+    );
+  }
+
+  Future<void> _confirmDeleteUserProfile(AdminUserProfile user) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete user profile?'),
+        content: Text(
+          'Delete the app profile for ${user.name}? This does not remove the sign-in account.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(context, true),
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('Delete profile'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    await _runUserMutation(
+      () => widget.repository.deleteUserProfile(widget.session, user),
+      success: '${user.name} profile deleted.',
+    );
+  }
+
+  Future<void> _runUserMutation(
+    Future<void> Function() mutation, {
+    required String success,
+  }) async {
+    setState(() => _isSyncing = true);
+    try {
+      await mutation();
+      await _loadUsers();
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(success)));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_friendlyError(error))));
+    } finally {
+      if (mounted) setState(() => _isSyncing = false);
+    }
+  }
+
+  Future<void> _saveAdminNotice(AdminNotice notice) async {
+    setState(() => _isSyncing = true);
+    try {
+      final saved = notice.copyWith(
+        updatedAt: DateTime.now(),
+        updatedBy: widget.session.email,
+      );
+      await widget.repository.saveAdminNotice(widget.session, saved);
+      if (!mounted) return;
+      setState(() => _adminNotice = saved);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Admin notice saved.')));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_friendlyError(error))));
+    } finally {
+      if (mounted) setState(() => _isSyncing = false);
+    }
+  }
+
   Future<void> _changeTechnicianTeam(AdminUserProfile technician) async {
     final teams =
         _technicians
@@ -799,15 +937,18 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
       );
       if (!mounted) return;
       setState(() {
-        _technicians = _technicians
+        _users = _users
             .map(
               (person) => person.uid == technician.uid
                   ? person.copyWith(team: team)
                   : person,
             )
             .toList();
+        _technicians = _users
+            .where((user) => user.role == AdminUserRole.technician.value)
+            .toList();
       });
-      await _loadTechnicians();
+      await _loadUsers();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('${technician.name} assigned to $team.')),
@@ -2829,6 +2970,473 @@ class _QrDetail extends StatelessWidget {
   }
 }
 
+class UsersManagementView extends StatefulWidget {
+  const UsersManagementView({
+    super.key,
+    required this.users,
+    required this.onCreate,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final List<AdminUserProfile> users;
+  final VoidCallback onCreate;
+  final ValueChanged<AdminUserProfile> onEdit;
+  final ValueChanged<AdminUserProfile> onDelete;
+
+  @override
+  State<UsersManagementView> createState() => _UsersManagementViewState();
+}
+
+class _UsersManagementViewState extends State<UsersManagementView> {
+  String _query = '';
+  String _role = 'All';
+
+  @override
+  Widget build(BuildContext context) {
+    final active = widget.users.where((user) => !user.disabled).length;
+    final technicians = widget.users
+        .where((user) => user.role == AdminUserRole.technician.value)
+        .length;
+    final admins = widget.users
+        .where((user) => user.role == AdminUserRole.admin.value)
+        .length;
+    final filtered = _filteredUsers();
+
+    return _Page(
+      children: [
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            _MetricCard(
+              icon: Icons.people_outline,
+              label: 'Total users',
+              value: '${widget.users.length}',
+              detail: '$active active profiles',
+              color: AppColors.primary,
+            ),
+            _MetricCard(
+              icon: Icons.engineering_outlined,
+              label: 'Technicians',
+              value: '$technicians',
+              detail: 'Available for dispatch',
+              color: AppColors.success,
+            ),
+            _MetricCard(
+              icon: Icons.admin_panel_settings_outlined,
+              label: 'Admins',
+              value: '$admins',
+              detail: 'Console access profiles',
+              color: AppColors.warning,
+            ),
+          ],
+        ),
+        const SizedBox(height: 18),
+        _Panel(
+          title: 'User Directory',
+          trailing: FilledButton.icon(
+            onPressed: widget.onCreate,
+            icon: const Icon(Icons.person_add_alt_1_outlined),
+            label: const Text('Add user'),
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      decoration: InputDecoration(
+                        labelText: 'Search users',
+                        prefixIcon: const Icon(Icons.search),
+                        suffixIcon: _query.isEmpty
+                            ? null
+                            : IconButton(
+                                tooltip: 'Clear search',
+                                onPressed: () => setState(() => _query = ''),
+                                icon: const Icon(Icons.close),
+                              ),
+                      ),
+                      onChanged: (value) => setState(() => _query = value),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  SizedBox(
+                    width: 260,
+                    child: DropdownButtonFormField<String>(
+                      initialValue: _role,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Role',
+                        prefixIcon: Icon(Icons.badge_outlined),
+                      ),
+                      items: [
+                        const DropdownMenuItem(
+                          value: 'All',
+                          child: Text('All roles'),
+                        ),
+                        for (final role in _userFilterRoles)
+                          DropdownMenuItem(
+                            value: role.value,
+                            child: Text(role.label),
+                          ),
+                      ],
+                      onChanged: (value) {
+                        if (value == null) return;
+                        setState(() => _role = value);
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              if (filtered.isEmpty)
+                const _EmptyState(message: 'No users match those filters.')
+              else
+                _UserProfileGrid(
+                  users: filtered,
+                  onEdit: widget.onEdit,
+                  onDelete: widget.onDelete,
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  List<AdminUserProfile> _filteredUsers() {
+    final query = _query.trim().toLowerCase();
+    return widget.users.where((user) {
+      if (_role != 'All' && user.role != _role) return false;
+      if (query.isEmpty) return true;
+      return [
+        user.uid,
+        user.email,
+        user.name,
+        user.roleLabel,
+        user.team ?? '',
+        user.phone ?? '',
+        user.statusLabel,
+      ].any((value) => value.toLowerCase().contains(query));
+    }).toList();
+  }
+}
+
+class _UserProfileGrid extends StatelessWidget {
+  const _UserProfileGrid({
+    required this.users,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final List<AdminUserProfile> users;
+  final ValueChanged<AdminUserProfile> onEdit;
+  final ValueChanged<AdminUserProfile> onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 12,
+      runSpacing: 12,
+      children: users
+          .map(
+            (user) => _UserProfileCard(
+              user: user,
+              onEdit: () => onEdit(user),
+              onDelete: () => onDelete(user),
+            ),
+          )
+          .toList(),
+    );
+  }
+}
+
+class _UserProfileCard extends StatelessWidget {
+  const _UserProfileCard({
+    required this.user,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final AdminUserProfile user;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 360,
+      child: Card(
+        margin: EdgeInsets.zero,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  CircleAvatar(
+                    radius: 22,
+                    backgroundColor: AppColors.primary.withValues(alpha: 0.12),
+                    child: Text(
+                      user.initials,
+                      style: const TextStyle(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          user.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        Text(
+                          user.email,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: AppColors.muted),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Edit user',
+                    onPressed: onEdit,
+                    icon: const Icon(Icons.edit_outlined),
+                  ),
+                  IconButton(
+                    tooltip: 'Delete user profile',
+                    onPressed: onDelete,
+                    icon: const Icon(Icons.delete_outline),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _StatusPill(label: user.roleLabel, color: AppColors.primary),
+                  _StatusPill(
+                    label: user.statusLabel,
+                    color: user.disabled ? AppColors.danger : AppColors.success,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              _ProfileLine(label: 'Team', value: user.teamLabel),
+              _ProfileLine(
+                label: 'Phone',
+                value: user.phone?.isNotEmpty == true ? user.phone! : '-',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class UserProfileDialog extends StatefulWidget {
+  const UserProfileDialog({super.key, this.user});
+
+  final AdminUserProfile? user;
+
+  @override
+  State<UserProfileDialog> createState() => _UserProfileDialogState();
+}
+
+class _UserProfileDialogState extends State<UserProfileDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _uidController;
+  late final TextEditingController _emailController;
+  late final TextEditingController _nameController;
+  late final TextEditingController _teamController;
+  late final TextEditingController _phoneController;
+  late AdminUserRole _role;
+  late bool _disabled;
+
+  bool get _isEditing => widget.user != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final user = widget.user;
+    _uidController = TextEditingController(text: user?.uid ?? '');
+    _emailController = TextEditingController(text: user?.email ?? '');
+    _nameController = TextEditingController(text: user?.name ?? '');
+    _teamController = TextEditingController(text: user?.team ?? '');
+    _phoneController = TextEditingController(text: user?.phone ?? '');
+    final userRole = user?.roleType ?? AdminUserRole.technician;
+    _role = _userFilterRoles.contains(userRole)
+        ? userRole
+        : AdminUserRole.technician;
+    _disabled = user?.disabled ?? false;
+  }
+
+  @override
+  void dispose() {
+    _uidController.dispose();
+    _emailController.dispose();
+    _nameController.dispose();
+    _teamController.dispose();
+    _phoneController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const roleOptions = _userFilterRoles;
+    return AlertDialog(
+      title: Text(_isEditing ? 'Edit User' : 'Add User'),
+      content: SizedBox(
+        width: 520,
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: _uidController,
+                  readOnly: _isEditing,
+                  decoration: const InputDecoration(
+                    labelText: 'User ID',
+                    prefixIcon: Icon(Icons.fingerprint),
+                  ),
+                  validator: (value) {
+                    final id = value?.trim() ?? '';
+                    if (id.isEmpty) return 'Enter a user ID.';
+                    if (id.contains('/')) return 'User ID cannot contain /.';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: const InputDecoration(
+                    labelText: 'Email',
+                    prefixIcon: Icon(Icons.email_outlined),
+                  ),
+                  validator: (value) {
+                    final email = value?.trim() ?? '';
+                    if (email.isEmpty) return 'Enter an email.';
+                    if (!email.contains('@')) return 'Enter a valid email.';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Name',
+                    prefixIcon: Icon(Icons.person_outline),
+                  ),
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Enter a name.';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<AdminUserRole>(
+                  initialValue: _role,
+                  decoration: const InputDecoration(
+                    labelText: 'Role',
+                    prefixIcon: Icon(Icons.badge_outlined),
+                  ),
+                  items: roleOptions
+                      .map(
+                        (role) => DropdownMenuItem(
+                          value: role,
+                          child: Text(role.label),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setState(() => _role = value);
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _teamController,
+                  decoration: const InputDecoration(
+                    labelText: 'Team',
+                    prefixIcon: Icon(Icons.groups_outlined),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _phoneController,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(
+                    labelText: 'Phone',
+                    prefixIcon: Icon(Icons.phone_outlined),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Disabled profile'),
+                  subtitle: const Text(
+                    'Use this to remove app access while keeping the profile on record.',
+                  ),
+                  value: _disabled,
+                  onChanged: (value) => setState(() => _disabled = value),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton.icon(
+          onPressed: _save,
+          icon: Icon(_isEditing ? Icons.save_outlined : Icons.person_add_alt),
+          label: Text(_isEditing ? 'Save user' : 'Create user'),
+        ),
+      ],
+    );
+  }
+
+  void _save() {
+    if (!_formKey.currentState!.validate()) return;
+    final now = DateTime.now();
+    Navigator.pop(
+      context,
+      AdminUserProfile(
+        uid: _uidController.text.trim(),
+        email: _emailController.text.trim(),
+        name: _nameController.text.trim(),
+        role: _role.value,
+        team: _teamController.text.trim(),
+        phone: _phoneController.text.trim(),
+        disabled: _disabled,
+        createdAt: widget.user?.createdAt ?? now,
+        updatedAt: now,
+      ),
+    );
+  }
+}
+
 class TeamsView extends StatelessWidget {
   const TeamsView({
     super.key,
@@ -4108,6 +4716,11 @@ abstract class AdminRepository {
   Future<List<WorkOrder>> fetchWorkOrders(AuthSession session);
   Future<List<Invoice>> fetchInvoices(AuthSession session);
   Future<void> saveInvoice(AuthSession session, Invoice invoice);
+  Future<AdminNotice?> fetchAdminNotice(AuthSession session);
+  Future<void> saveAdminNotice(AuthSession session, AdminNotice notice);
+  Future<List<AdminUserProfile>> fetchUsers(AuthSession session);
+  Future<void> saveUserProfile(AuthSession session, AdminUserProfile profile);
+  Future<void> deleteUserProfile(AuthSession session, AdminUserProfile profile);
   Future<List<AdminUserProfile>> fetchTechnicians(AuthSession session);
   Future<void> updateTechnicianTeam(
     AuthSession session,
@@ -4235,7 +4848,30 @@ class RestAdminRepository implements AdminRepository {
   }
 
   @override
-  Future<List<AdminUserProfile>> fetchTechnicians(AuthSession session) async {
+  Future<AdminNotice?> fetchAdminNotice(AuthSession session) async {
+    final uri = _documentsUri('/admin_config/notice');
+    final response = await _client.get(uri, headers: _headers(session));
+    if (response.statusCode == 404) return null;
+    final body = _decode(response);
+    if (response.statusCode >= 400) throw ApiException.fromBody(body);
+    return AdminNotice.fromFirestoreDocument(body);
+  }
+
+  @override
+  Future<void> saveAdminNotice(AuthSession session, AdminNotice notice) async {
+    final uri = _documentsUri('/admin_config/notice');
+    final response = await _client.patch(
+      uri,
+      headers: _headers(session),
+      body: jsonEncode({'fields': notice.toFirestoreFields()}),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException.fromBody(_decode(response));
+    }
+  }
+
+  @override
+  Future<List<AdminUserProfile>> fetchUsers(AuthSession session) async {
     final users = <AdminUserProfile>[];
     String? pageToken;
     do {
@@ -4248,16 +4884,56 @@ class RestAdminRepository implements AdminRepository {
 
       final documents = (body['documents'] as List<dynamic>? ?? const []);
       users.addAll(
-        documents
-            .whereType<Map<String, dynamic>>()
-            .map(AdminUserProfile.fromFirestoreDocument)
-            .where((user) => user.role == 'technician'),
+        documents.whereType<Map<String, dynamic>>().map(
+          AdminUserProfile.fromFirestoreDocument,
+        ),
       );
       pageToken = body['nextPageToken'] as String?;
     } while (pageToken != null && pageToken.isNotEmpty);
 
     users.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     return users;
+  }
+
+  @override
+  Future<void> saveUserProfile(
+    AuthSession session,
+    AdminUserProfile profile,
+  ) async {
+    final fields = profile.toFirestoreFields(updatedAt: DateTime.now());
+    final query = <String, dynamic>{};
+    for (final key in fields.keys) {
+      query.putIfAbsent('updateMask.fieldPaths', () => <String>[]).add(key);
+    }
+    final uri = _documentsUri('/users/${profile.uid}', query: query);
+    final response = await _client.patch(
+      uri,
+      headers: _headers(session),
+      body: jsonEncode({'fields': fields}),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException.fromBody(_decode(response));
+    }
+  }
+
+  @override
+  Future<void> deleteUserProfile(
+    AuthSession session,
+    AdminUserProfile profile,
+  ) async {
+    final uri = _documentsUri('/users/${profile.uid}');
+    final response = await _client.delete(uri, headers: _headers(session));
+    if (response.statusCode >= 400) {
+      throw ApiException.fromBody(_decode(response));
+    }
+  }
+
+  @override
+  Future<List<AdminUserProfile>> fetchTechnicians(AuthSession session) async {
+    final users = await fetchUsers(session);
+    return users
+        .where((user) => user.role == AdminUserRole.technician.value)
+        .toList();
   }
 
   @override
@@ -4494,6 +5170,345 @@ class AuthSession {
   final String uid;
 }
 
+class AdminNotice {
+  const AdminNotice({
+    required this.title,
+    required this.message,
+    this.active = true,
+    this.updatedAt,
+    this.updatedBy,
+  });
+
+  final String title;
+  final String message;
+  final bool active;
+  final DateTime? updatedAt;
+  final String? updatedBy;
+
+  AdminNotice copyWith({
+    String? title,
+    String? message,
+    bool? active,
+    DateTime? updatedAt,
+    String? updatedBy,
+  }) {
+    return AdminNotice(
+      title: title ?? this.title,
+      message: message ?? this.message,
+      active: active ?? this.active,
+      updatedAt: updatedAt ?? this.updatedAt,
+      updatedBy: updatedBy ?? this.updatedBy,
+    );
+  }
+
+  factory AdminNotice.fromFirestoreDocument(Map<String, dynamic> document) {
+    final fields = document['fields'] as Map<String, dynamic>? ?? const {};
+    return AdminNotice(
+      title: _fieldString(fields['title']) ?? '',
+      message: _fieldString(fields['message']) ?? '',
+      active: _fieldBool(fields['active']) ?? true,
+      updatedAt: _fieldDate(fields['updatedAt']),
+      updatedBy: _fieldString(fields['updatedBy']),
+    );
+  }
+
+  Map<String, Object?> toFirestoreFields() {
+    return {
+      'title': _stringField(title.trim()),
+      'message': _stringField(message.trim()),
+      'active': _boolField(active),
+      'updatedAt': _timestampField(updatedAt ?? DateTime.now()),
+      'updatedBy': _stringField(updatedBy?.trim() ?? 'admin'),
+    };
+  }
+}
+
+class AdminToolsView extends StatefulWidget {
+  const AdminToolsView({
+    super.key,
+    required this.orders,
+    required this.users,
+    required this.notice,
+    required this.onSaveNotice,
+  });
+
+  final List<WorkOrder> orders;
+  final List<AdminUserProfile> users;
+  final AdminNotice? notice;
+  final Future<void> Function(AdminNotice notice) onSaveNotice;
+
+  @override
+  State<AdminToolsView> createState() => _AdminToolsViewState();
+}
+
+class _AdminToolsViewState extends State<AdminToolsView> {
+  final _noticeTitle = TextEditingController();
+  final _noticeMessage = TextEditingController();
+  bool _noticeActive = true;
+  bool _savingNotice = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncNotice();
+  }
+
+  @override
+  void didUpdateWidget(AdminToolsView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.notice != widget.notice) _syncNotice();
+  }
+
+  @override
+  void dispose() {
+    _noticeTitle.dispose();
+    _noticeMessage.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final overdue = widget.orders
+        .where((order) => order.status != 'Approved' && _isPastDue(order))
+        .length;
+    final unassigned = widget.orders
+        .where((order) => order.technicianLabel == null)
+        .length;
+    final activeUsers = widget.users.where((user) => !user.disabled).length;
+
+    return _Page(
+      children: [
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            _MetricCard(
+              icon: Icons.warning_amber_outlined,
+              label: 'Overdue jobs',
+              value: '$overdue',
+              detail: 'Open jobs past due',
+              color: AppColors.danger,
+            ),
+            _MetricCard(
+              icon: Icons.person_search_outlined,
+              label: 'Unassigned',
+              value: '$unassigned',
+              detail: 'Jobs needing dispatch',
+              color: AppColors.warning,
+            ),
+            _MetricCard(
+              icon: Icons.verified_user_outlined,
+              label: 'Active users',
+              value: '$activeUsers',
+              detail: '${widget.users.length} profiles total',
+              color: AppColors.success,
+            ),
+          ],
+        ),
+        const SizedBox(height: 18),
+        _Panel(
+          title: 'Admin Exports',
+          child: Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              _AdminToolCard(
+                icon: Icons.assignment_outlined,
+                title: 'Work orders CSV',
+                detail: 'Copy job status, site, SLA, and assignment data.',
+                actionLabel: 'Copy jobs',
+                onPressed: () => _copyCsv(
+                  context,
+                  'work orders',
+                  adminWorkOrdersCsv(widget.orders),
+                ),
+              ),
+              _AdminToolCard(
+                icon: Icons.manage_accounts_outlined,
+                title: 'Users CSV',
+                detail: 'Copy profile, role, team, and status data.',
+                actionLabel: 'Copy users',
+                onPressed: () =>
+                    _copyCsv(context, 'users', adminUsersCsv(widget.users)),
+              ),
+              _AdminToolCard(
+                icon: Icons.fact_check_outlined,
+                title: 'Approval snapshot',
+                detail: 'Copy a short operational summary for handover.',
+                actionLabel: 'Copy summary',
+                onPressed: () => _copyCsv(
+                  context,
+                  'summary',
+                  adminSummary(widget.orders, widget.users),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        _Panel(
+          title: 'Admin Notice',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: _noticeTitle,
+                decoration: const InputDecoration(
+                  labelText: 'Notice title',
+                  prefixIcon: Icon(Icons.campaign_outlined),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _noticeMessage,
+                minLines: 3,
+                maxLines: 5,
+                decoration: const InputDecoration(
+                  labelText: 'Notice message',
+                  prefixIcon: Icon(Icons.notes_outlined),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Show notice'),
+                subtitle: Text(_noticeMeta(widget.notice)),
+                value: _noticeActive,
+                onChanged: (value) => setState(() => _noticeActive = value),
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton.icon(
+                  onPressed: _savingNotice ? null : _saveNotice,
+                  icon: _savingNotice
+                      ? const _AnimatedLogoLoader(size: 22, compact: true)
+                      : const Icon(Icons.save_outlined),
+                  label: Text(_savingNotice ? 'Saving' : 'Save notice'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _syncNotice() {
+    final notice = widget.notice;
+    _noticeTitle.text = notice?.title ?? '';
+    _noticeMessage.text = notice?.message ?? '';
+    _noticeActive = notice?.active ?? true;
+  }
+
+  Future<void> _saveNotice() async {
+    final title = _noticeTitle.text.trim();
+    final message = _noticeMessage.text.trim();
+    if (title.isEmpty || message.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a notice title and message.')),
+      );
+      return;
+    }
+    setState(() => _savingNotice = true);
+    try {
+      await widget.onSaveNotice(
+        AdminNotice(title: title, message: message, active: _noticeActive),
+      );
+    } finally {
+      if (mounted) setState(() => _savingNotice = false);
+    }
+  }
+
+  Future<void> _copyCsv(
+    BuildContext context,
+    String label,
+    String value,
+  ) async {
+    await Clipboard.setData(ClipboardData(text: value));
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('$label copied to clipboard.')));
+  }
+}
+
+class _AdminToolCard extends StatelessWidget {
+  const _AdminToolCard({
+    required this.icon,
+    required this.title,
+    required this.detail,
+    required this.actionLabel,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String title;
+  final String detail;
+  final String actionLabel;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 330,
+      child: Card(
+        margin: EdgeInsets.zero,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _IconPill(icon: icon, color: AppColors.primary),
+              const SizedBox(height: 12),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(detail, style: const TextStyle(color: AppColors.muted)),
+              const SizedBox(height: 14),
+              OutlinedButton.icon(
+                onPressed: onPressed,
+                icon: const Icon(Icons.copy_outlined),
+                label: Text(actionLabel),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+enum AdminUserRole {
+  admin('admin', 'Admin'),
+  supervisor('supervisor', 'Supervisor'),
+  technician('technician', 'Technician'),
+  billing('billing', 'Billing'),
+  viewer('viewer', 'Viewer');
+
+  const AdminUserRole(this.value, this.label);
+  final String value;
+  final String label;
+
+  static AdminUserRole fromValue(String? value) {
+    final normalized = value?.trim().toLowerCase();
+    return AdminUserRole.values.firstWhere(
+      (role) => role.value == normalized,
+      orElse: () => AdminUserRole.technician,
+    );
+  }
+}
+
+const _userFilterRoles = [
+  AdminUserRole.admin,
+  AdminUserRole.supervisor,
+  AdminUserRole.technician,
+];
+
 class AdminUserProfile {
   const AdminUserProfile({
     required this.uid,
@@ -4501,6 +5516,10 @@ class AdminUserProfile {
     required this.name,
     required this.role,
     this.team,
+    this.phone,
+    this.disabled = false,
+    this.createdAt,
+    this.updatedAt,
   });
 
   final String uid;
@@ -4508,8 +5527,15 @@ class AdminUserProfile {
   final String name;
   final String role;
   final String? team;
+  final String? phone;
+  final bool disabled;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
 
   String get teamLabel => team?.isNotEmpty == true ? team! : 'Unassigned team';
+  String get statusLabel => disabled ? 'Disabled' : 'Active';
+  AdminUserRole get roleType => AdminUserRole.fromValue(role);
+  String get roleLabel => roleType.label;
 
   String get initials {
     final parts = name
@@ -4521,13 +5547,27 @@ class AdminUserProfile {
     return parts.take(2).map((part) => part[0].toUpperCase()).join();
   }
 
-  AdminUserProfile copyWith({String? team}) {
+  AdminUserProfile copyWith({
+    String? uid,
+    String? email,
+    String? name,
+    String? role,
+    String? team,
+    String? phone,
+    bool? disabled,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) {
     return AdminUserProfile(
-      uid: uid,
-      email: email,
-      name: name,
-      role: role,
+      uid: uid ?? this.uid,
+      email: email ?? this.email,
+      name: name ?? this.name,
+      role: role ?? this.role,
       team: team ?? this.team,
+      phone: phone ?? this.phone,
+      disabled: disabled ?? this.disabled,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
     );
   }
 
@@ -4545,9 +5585,27 @@ class AdminUserProfile {
       name: storedName?.isNotEmpty == true
           ? storedName!
           : displayPersonName(email),
-      role: (_fieldString(fields['role']) ?? 'technician').toLowerCase(),
+      role: AdminUserRole.fromValue(_fieldString(fields['role'])).value,
       team: _fieldString(fields['team'])?.trim(),
+      phone: _fieldString(fields['phone'])?.trim(),
+      disabled: _fieldBool(fields['disabled']) ?? false,
+      createdAt: _fieldDate(fields['createdAt']),
+      updatedAt: _fieldDate(fields['updatedAt']),
     );
+  }
+
+  Map<String, Object?> toFirestoreFields({DateTime? updatedAt}) {
+    final created = createdAt ?? DateTime.now();
+    return {
+      'email': _stringField(email.trim()),
+      'name': _stringField(name.trim()),
+      'role': _stringField(AdminUserRole.fromValue(role).value),
+      'team': _stringField(team?.trim() ?? ''),
+      'phone': _stringField(phone?.trim() ?? ''),
+      'disabled': _boolField(disabled),
+      'createdAt': _timestampField(created),
+      'updatedAt': _timestampField(updatedAt ?? DateTime.now()),
+    };
   }
 }
 
@@ -5081,8 +6139,10 @@ enum AdminSection {
   workOrders('Work orders', Icons.assignment_outlined),
   jobChats('Job chats', Icons.forum_outlined),
   teams('Field teams', Icons.people_alt_outlined),
+  users('Users', Icons.manage_accounts_outlined),
   acceptance('Acceptance', Icons.fact_check_outlined),
   billing('Billing & Invoices', Icons.receipt_long_outlined),
+  adminTools('Admin Tools', Icons.tune_outlined),
   analytics('Analytics', Icons.query_stats_outlined);
 
   const AdminSection(this.label, this.icon);
@@ -5095,8 +6155,10 @@ enum AdminSection {
       AdminSection.workOrders => 'Create and manage jobs',
       AdminSection.jobChats => 'Live site conversations',
       AdminSection.teams => 'Assign field technicians',
+      AdminSection.users => 'Profiles, roles, and access',
       AdminSection.acceptance => 'Review submitted work',
       AdminSection.billing => 'Draft, issue, and track',
+      AdminSection.adminTools => 'Exports and notices',
       AdminSection.analytics => 'Performance reports',
     };
   }
@@ -5185,15 +6247,23 @@ class _Sidebar extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 28),
-          for (final section in AdminSection.values)
-            _NavItem(
-              icon: section.icon,
-              label: section.label,
-              subtitle: section.subtitle,
-              selected: section == selected,
-              onTap: () => onSelected(section),
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                children: [
+                  for (final section in AdminSection.values)
+                    _NavItem(
+                      icon: section.icon,
+                      label: section.label,
+                      subtitle: section.subtitle,
+                      selected: section == selected,
+                      onTap: () => onSelected(section),
+                    ),
+                ],
+              ),
             ),
-          const Spacer(),
+          ),
+          const SizedBox(height: 16),
           Text(userEmail, style: const TextStyle(color: AppColors.muted)),
           const SizedBox(height: 10),
           OutlinedButton.icon(
@@ -6879,6 +7949,93 @@ String displayPersonName(String? value) {
       .where((part) => part.isNotEmpty)
       .map((part) => '${part[0].toUpperCase()}${part.substring(1)}')
       .join(' ');
+}
+
+String adminWorkOrdersCsv(List<WorkOrder> orders) {
+  final rows = [
+    [
+      'id',
+      'site',
+      'address',
+      'status',
+      'priority',
+      'sla',
+      'dueAt',
+      'assignedTo',
+    ],
+    for (final order in orders)
+      [
+        order.id,
+        order.site,
+        order.address,
+        order.status,
+        order.priority.label,
+        order.sla,
+        order.dueAt?.toIso8601String() ?? '',
+        order.technicianLabel ?? '',
+      ],
+  ];
+  return rows.map(_csvRow).join('\n');
+}
+
+String adminUsersCsv(List<AdminUserProfile> users) {
+  final rows = [
+    ['uid', 'name', 'email', 'role', 'team', 'status', 'phone'],
+    for (final user in users)
+      [
+        user.uid,
+        user.name,
+        user.email,
+        user.role,
+        user.team ?? '',
+        user.statusLabel,
+        user.phone ?? '',
+      ],
+  ];
+  return rows.map(_csvRow).join('\n');
+}
+
+String adminSummary(List<WorkOrder> orders, List<AdminUserProfile> users) {
+  final open = orders.where((order) => order.status != 'Approved').length;
+  final overdue = orders
+      .where((order) => order.status != 'Approved' && _isPastDue(order))
+      .length;
+  final submitted = orders.where((order) => order.status == 'Submitted').length;
+  final activeUsers = users.where((user) => !user.disabled).length;
+  return [
+    'PHEPHA MV ISDP admin summary',
+    'Generated: ${DateTime.now().toIso8601String()}',
+    'Total jobs: ${orders.length}',
+    'Open jobs: $open',
+    'Overdue jobs: $overdue',
+    'Pending approval: $submitted',
+    'Active users: $activeUsers',
+  ].join('\n');
+}
+
+bool _isPastDue(WorkOrder order) {
+  final dueAt = order.dueAt;
+  return dueAt != null && dueAt.isBefore(DateTime.now());
+}
+
+String _csvRow(List<String> values) => values.map(_csvCell).join(',');
+
+String _csvCell(String value) {
+  final escaped = value.replaceAll('"', '""');
+  if (escaped.contains(',') ||
+      escaped.contains('"') ||
+      escaped.contains('\n') ||
+      escaped.contains('\r')) {
+    return '"$escaped"';
+  }
+  return escaped;
+}
+
+String _noticeMeta(AdminNotice? notice) {
+  if (notice?.updatedAt == null) return 'No saved notice yet.';
+  final updatedBy = notice!.updatedBy?.trim();
+  final owner = updatedBy?.isNotEmpty == true ? ' by $updatedBy' : '';
+  return 'Last updated ${_dateLabel(notice.updatedAt!)}$owner.';
 }
 
 WorkOrder? _findOrder(String id, List<WorkOrder> orders) {

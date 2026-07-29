@@ -92,7 +92,7 @@ function assertSmtpConfigured() {
   if (!isSmtpConfigured()) {
     throw new HttpsError(
       "failed-precondition",
-      "Email delivery is not configured. Set SMTP_HOST, SMTP_FROM, SMTP_USER, and SMTP_PASS.",
+      "Email delivery is not ready yet. Ask IT to finish the email setup.",
     );
   }
 }

@@ -10,7 +10,14 @@ import 'package:isdp_admin_desktop/main.dart';
 class FakeAdminRepository implements AdminRepository {
   final deletedIds = <String>[];
   final savedInvoices = <Invoice>[];
-  final technicians = <AdminUserProfile>[
+  final users = <AdminUserProfile>[
+    const AdminUserProfile(
+      uid: 'admin-1',
+      email: 'admin@commit.co.sz',
+      name: 'Admin User',
+      role: 'admin',
+      team: 'Operations',
+    ),
     const AdminUserProfile(
       uid: 'tech-1',
       email: 'sibusiso@commit.co.sz',
@@ -37,6 +44,9 @@ class FakeAdminRepository implements AdminRepository {
   String? updatedAction;
   AdminUserProfile? updatedTechnician;
   String? updatedTeam;
+  AdminUserProfile? savedUser;
+  AdminUserProfile? deletedUser;
+  AdminNotice? savedNotice;
 
   @override
   Future<AuthSession> signIn({
@@ -119,8 +129,46 @@ class FakeAdminRepository implements AdminRepository {
   }
 
   @override
+  Future<AdminNotice?> fetchAdminNotice(AuthSession session) async {
+    return savedNotice;
+  }
+
+  @override
+  Future<void> saveAdminNotice(AuthSession session, AdminNotice notice) async {
+    savedNotice = notice;
+  }
+
+  @override
+  Future<List<AdminUserProfile>> fetchUsers(AuthSession session) async {
+    return List.of(users);
+  }
+
+  @override
+  Future<void> saveUserProfile(
+    AuthSession session,
+    AdminUserProfile profile,
+  ) async {
+    savedUser = profile;
+    final index = users.indexWhere((user) => user.uid == profile.uid);
+    if (index == -1) {
+      users.add(profile);
+    } else {
+      users[index] = profile;
+    }
+  }
+
+  @override
+  Future<void> deleteUserProfile(
+    AuthSession session,
+    AdminUserProfile profile,
+  ) async {
+    deletedUser = profile;
+    users.removeWhere((user) => user.uid == profile.uid);
+  }
+
+  @override
   Future<List<AdminUserProfile>> fetchTechnicians(AuthSession session) async {
-    return technicians.where((user) => user.role == 'technician').toList();
+    return users.where((user) => user.role == 'technician').toList();
   }
 
   @override
@@ -131,9 +179,9 @@ class FakeAdminRepository implements AdminRepository {
   }) async {
     updatedTechnician = technician;
     updatedTeam = team;
-    final index = technicians.indexWhere((user) => user.uid == technician.uid);
+    final index = users.indexWhere((user) => user.uid == technician.uid);
     if (index != -1) {
-      technicians[index] = technicians[index].copyWith(team: team);
+      users[index] = users[index].copyWith(team: team);
     }
   }
 
@@ -406,6 +454,190 @@ void main() {
     expect(fields['team']['stringValue'], 'Rapid Response');
     expect(requestedUri!.path, contains('/documents/users/tech-1'));
     expect(requestedUri!.queryParametersAll['updateMask.fieldPaths'], ['team']);
+  });
+
+  test('admin repository fetches all user profiles', () async {
+    final repository = RestAdminRepository(
+      client: MockClient((request) async {
+        expect(request.url.path, contains('/documents/users'));
+        return http.Response('''
+{
+  "documents": [
+    {
+      "name": "projects/demo/databases/(default)/documents/users/admin-1",
+      "fields": {
+        "email": {"stringValue": "admin@commit.co.sz"},
+        "name": {"stringValue": "Admin User"},
+        "role": {"stringValue": "admin"},
+        "disabled": {"booleanValue": false}
+      }
+    },
+    {
+      "name": "projects/demo/databases/(default)/documents/users/tech-1",
+      "fields": {
+        "email": {"stringValue": "tech@commit.co.sz"},
+        "name": {"stringValue": "Tech User"},
+        "role": {"stringValue": "technician"},
+        "phone": {"stringValue": "0791762956"}
+      }
+    }
+  ]
+}
+''', 200);
+      }),
+    );
+
+    final users = await repository.fetchUsers(
+      const AuthSession(
+        idToken: 'token',
+        email: 'admin@test.com',
+        uid: 'admin',
+      ),
+    );
+
+    expect(users.map((user) => user.uid), ['admin-1', 'tech-1']);
+    expect(users.first.roleLabel, 'Admin');
+    expect(users.last.phone, '0791762956');
+  });
+
+  test('admin repository saves a user profile in Firestore', () async {
+    Map<String, dynamic>? payload;
+    Uri? requestedUri;
+    final repository = RestAdminRepository(
+      client: MockClient((request) async {
+        requestedUri = request.url;
+        payload = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response('{}', 200);
+      }),
+    );
+
+    await repository.saveUserProfile(
+      const AuthSession(
+        idToken: 'token',
+        email: 'admin@test.com',
+        uid: 'admin',
+      ),
+      AdminUserProfile(
+        uid: 'user-1',
+        email: 'user@commit.co.sz',
+        name: 'User One',
+        role: 'supervisor',
+        team: 'North Region',
+        phone: '0712345678',
+        disabled: true,
+        createdAt: DateTime(2026, 7, 18),
+      ),
+    );
+
+    final fields = payload!['fields'] as Map<String, dynamic>;
+    expect(fields['email']['stringValue'], 'user@commit.co.sz');
+    expect(fields['role']['stringValue'], 'supervisor');
+    expect(fields['disabled']['booleanValue'], isTrue);
+    expect(requestedUri!.path, contains('/documents/users/user-1'));
+    expect(
+      requestedUri!.queryParametersAll['updateMask.fieldPaths'],
+      containsAll(['email', 'name', 'role', 'team', 'phone', 'disabled']),
+    );
+  });
+
+  test('admin repository reads and saves the admin notice', () async {
+    final requestedMethods = <String>[];
+    final requestedPaths = <String>[];
+    Map<String, dynamic>? savedPayload;
+    final repository = RestAdminRepository(
+      client: MockClient((request) async {
+        requestedMethods.add(request.method);
+        requestedPaths.add(request.url.path);
+        if (request.method == 'GET') {
+          return http.Response('''
+{
+  "name": "projects/demo/databases/(default)/documents/admin_config/notice",
+  "fields": {
+    "title": {"stringValue": "Maintenance"},
+    "message": {"stringValue": "Use manual dispatch today."},
+    "active": {"booleanValue": true},
+    "updatedBy": {"stringValue": "admin@test.com"}
+  }
+}
+''', 200);
+        }
+        savedPayload = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response('{}', 200);
+      }),
+    );
+
+    final session = const AuthSession(
+      idToken: 'token',
+      email: 'admin@test.com',
+      uid: 'admin',
+    );
+    final notice = await repository.fetchAdminNotice(session);
+    await repository.saveAdminNotice(
+      session,
+      const AdminNotice(
+        title: 'Dispatch',
+        message: 'Prioritize overdue jobs.',
+        active: false,
+        updatedBy: 'admin@test.com',
+      ),
+    );
+
+    expect(notice?.title, 'Maintenance');
+    expect(requestedMethods, ['GET', 'PATCH']);
+    expect(
+      requestedPaths.every((path) => path.contains('/admin_config/notice')),
+      isTrue,
+    );
+    final fields = savedPayload!['fields'] as Map<String, dynamic>;
+    expect(fields['title']['stringValue'], 'Dispatch');
+    expect(fields['active']['booleanValue'], isFalse);
+  });
+
+  test('admin repository deletes a user profile document', () async {
+    Uri? requestedUri;
+    String? method;
+    final repository = RestAdminRepository(
+      client: MockClient((request) async {
+        requestedUri = request.url;
+        method = request.method;
+        return http.Response('{}', 200);
+      }),
+    );
+
+    await repository.deleteUserProfile(
+      const AuthSession(
+        idToken: 'token',
+        email: 'admin@test.com',
+        uid: 'admin',
+      ),
+      const AdminUserProfile(
+        uid: 'user-delete',
+        email: 'delete@commit.co.sz',
+        name: 'Delete User',
+        role: 'viewer',
+      ),
+    );
+
+    expect(method, 'DELETE');
+    expect(requestedUri!.path, contains('/documents/users/user-delete'));
+  });
+
+  test('admin CSV exports quote values safely', () {
+    final csv = adminWorkOrdersCsv([
+      WorkOrder(
+        id: 'JOB-CSV',
+        site: 'Mbabane, Central',
+        address: 'Main "A" Street',
+        scope: 'Router replacement',
+        sla: 'Due today',
+        siteCode: 'SITE-CSV',
+        status: 'New',
+        priority: Priority.high,
+      ),
+    ]);
+
+    expect(csv, contains('"Mbabane, Central"'));
+    expect(csv, contains('"Main ""A"" Street"'));
   });
 
   test('admin repository writes assigned technicians to Firestore', () async {
@@ -687,5 +919,124 @@ void main() {
     ]);
     expect(repository.updatedOrder?.assignedTo, 'Sibusiso M., Thabo M.');
     expect(repository.updatedAction, 'assigned to Sibusiso M., Thabo M.');
+  });
+
+  testWidgets('desktop admin manages user profiles', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = FakeAdminRepository();
+
+    await tester.pumpWidget(IsdpAdminApp(repository: repository));
+    await tester.enterText(find.byType(TextFormField).first, 'admin@test.com');
+    await tester.enterText(find.byType(TextFormField).last, 'password');
+    await tester.tap(find.text('Sign in'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Users'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('User Directory'), findsOneWidget);
+    expect(find.text('Admin User'), findsOneWidget);
+    expect(find.text('Sibusiso M.'), findsOneWidget);
+
+    await tester.tap(find.text('Add user'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'User ID'),
+      'viewer-1',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Email'),
+      'viewer@commit.co.sz',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Name'),
+      'Viewer One',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Create user'));
+    await tester.pumpAndSettle();
+
+    expect(repository.savedUser?.uid, 'viewer-1');
+    expect(repository.savedUser?.role, 'technician');
+    expect(find.text('Viewer One'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Edit user').first);
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.widgetWithText(DropdownButtonFormField<AdminUserRole>, 'Role'),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Admin'), findsWidgets);
+    expect(find.text('Supervisor'), findsWidgets);
+    expect(find.text('Technician'), findsWidgets);
+    expect(find.text('Billing'), findsNothing);
+    expect(find.text('Viewer'), findsNothing);
+    await tester.tap(find.text('Admin').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Name'),
+      'Admin Updated',
+    );
+    await tester.tap(find.widgetWithText(SwitchListTile, 'Disabled profile'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Save user'));
+    await tester.pumpAndSettle();
+
+    expect(repository.savedUser?.uid, 'admin-1');
+    expect(repository.savedUser?.name, 'Admin Updated');
+    expect(repository.savedUser?.disabled, isTrue);
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Search users'),
+      'viewer',
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Delete user profile').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Delete profile'));
+    await tester.pumpAndSettle();
+
+    expect(repository.deletedUser?.uid, 'viewer-1');
+    expect(find.text('Viewer One'), findsNothing);
+  });
+
+  testWidgets('desktop admin uses admin tools', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = FakeAdminRepository();
+
+    await tester.pumpWidget(IsdpAdminApp(repository: repository));
+    await tester.enterText(find.byType(TextFormField).first, 'admin@test.com');
+    await tester.enterText(find.byType(TextFormField).last, 'password');
+    await tester.tap(find.text('Sign in'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Admin Tools'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Admin Exports'), findsOneWidget);
+    expect(find.text('Work orders CSV'), findsOneWidget);
+    expect(find.text('Admin Notice'), findsOneWidget);
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Notice title'),
+      'Maintenance',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Notice message'),
+      'Use manual dispatch today.',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Save notice'));
+    await tester.pumpAndSettle();
+
+    expect(repository.savedNotice?.title, 'Maintenance');
+    expect(repository.savedNotice?.message, 'Use manual dispatch today.');
+    expect(repository.savedNotice?.updatedBy, 'admin@test.com');
   });
 }
