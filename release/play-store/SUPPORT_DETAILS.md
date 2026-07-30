@@ -2,8 +2,8 @@
 
 ## Public store contact
 
-- **Support email:** itsupport@phephasecurity.co.za
-- **Developer/organisation:** PHEPHA MV
+- **Support email:** info@softwap.co.za
+- **Developer/organisation:** Softwap (Pty) Ltd
 - **App name:** PHEPHA MV ISDP
 - **Package name:** za.co.phephamv.isdp
 - **Privacy-policy file:** `release/play-store/PRIVACY_POLICY.md`

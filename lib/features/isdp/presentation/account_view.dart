@@ -19,12 +19,14 @@ class AccountView extends StatelessWidget {
     this.userProfile,
     this.authRepository,
     this.repository,
+    this.onOpenSupportInbox,
   });
 
   final AppRole role;
   final AppUserProfile? userProfile;
   final AuthRepository? authRepository;
   final IsdpRepository? repository;
+  final VoidCallback? onOpenSupportInbox;
 
   @override
   Widget build(BuildContext context) {
@@ -60,7 +62,10 @@ class AccountView extends StatelessWidget {
               color: AppTheme.warning,
               onTap: () => _open(
                 context,
-                _NotificationSettingsScreen(userId: userProfile?.uid),
+                _NotificationSettingsScreen(
+                  userId: userProfile?.uid,
+                  role: role,
+                ),
               ),
             ),
             _SettingsItem(
@@ -71,8 +76,10 @@ class AccountView extends StatelessWidget {
               onTap: () => _open(
                 context,
                 _SupportScreen(
+                  role: role,
                   repository: repository,
                   userProfile: userProfile,
+                  onOpenSupportInbox: onOpenSupportInbox,
                 ),
               ),
             ),
@@ -748,9 +755,10 @@ class _ResetAccessCard extends StatelessWidget {
 }
 
 class _NotificationSettingsScreen extends StatefulWidget {
-  const _NotificationSettingsScreen({required this.userId});
+  const _NotificationSettingsScreen({required this.userId, required this.role});
 
   final String? userId;
+  final AppRole role;
 
   @override
   State<_NotificationSettingsScreen> createState() =>
@@ -805,26 +813,7 @@ class _NotificationSettingsScreenState
           ],
         ),
         const SizedBox(height: 12),
-        const _SectionCard(
-          title: 'Phone Alerts',
-          children: [
-            _InfoRow(
-              icon: Icons.assignment_ind_outlined,
-              title: 'Assignments',
-              subtitle: 'Alerts when work is assigned or dispatched',
-            ),
-            _InfoRow(
-              icon: Icons.done_all_outlined,
-              title: 'Approvals',
-              subtitle: 'Alerts when jobs are submitted or approved',
-            ),
-            _InfoRow(
-              icon: Icons.report_problem_outlined,
-              title: 'Issues',
-              subtitle: 'Alerts when field issues are reported',
-            ),
-          ],
-        ),
+        _SectionCard(title: 'Phone Alerts', children: _roleAlerts(widget.role)),
         SizedBox(height: 12),
         _SectionCard(
           title: 'Phone Setting',
@@ -838,6 +827,62 @@ class _NotificationSettingsScreenState
         ),
       ],
     );
+  }
+
+  List<Widget> _roleAlerts(AppRole role) {
+    return switch (role) {
+      AppRole.admin => const [
+        _InfoRow(
+          icon: Icons.add_task_outlined,
+          title: 'New and Submitted Jobs',
+          subtitle: 'New queue activity and jobs ready for approval',
+        ),
+        _InfoRow(
+          icon: Icons.timer_off_outlined,
+          title: 'SLA Escalations',
+          subtitle: 'Alerts when an open job exceeds its deadline',
+        ),
+        _InfoRow(
+          icon: Icons.support_agent_outlined,
+          title: 'Support Messages',
+          subtitle: 'Alerts when users contact the Support Inbox',
+        ),
+      ],
+      AppRole.supervisor => const [
+        _InfoRow(
+          icon: Icons.assignment_ind_outlined,
+          title: 'Supervisor Assignments',
+          subtitle: 'New jobs, acceptance reminders, and team activity',
+        ),
+        _InfoRow(
+          icon: Icons.alarm_outlined,
+          title: 'SLA Warnings',
+          subtitle: 'Alerts when assigned jobs approach their deadline',
+        ),
+        _InfoRow(
+          icon: Icons.report_problem_outlined,
+          title: 'Field Updates',
+          subtitle: 'Arrival, evidence, and issue-report alerts',
+        ),
+      ],
+      AppRole.technician => const [
+        _InfoRow(
+          icon: Icons.assignment_ind_outlined,
+          title: 'Job Assignments',
+          subtitle: 'Alerts when work is assigned or dispatched to you',
+        ),
+        _InfoRow(
+          icon: Icons.done_all_outlined,
+          title: 'Approval Updates',
+          subtitle: 'Alerts when your submitted work is approved',
+        ),
+        _InfoRow(
+          icon: Icons.forum_outlined,
+          title: 'Job Conversations',
+          subtitle: 'Updates from the field team and job chat',
+        ),
+      ],
+    };
   }
 
   Future<void> _registerThisPhone() async {
@@ -878,10 +923,17 @@ class _NotificationSettingsScreenState
 }
 
 class _SupportScreen extends StatefulWidget {
-  const _SupportScreen({required this.repository, required this.userProfile});
+  const _SupportScreen({
+    required this.role,
+    required this.repository,
+    required this.userProfile,
+    required this.onOpenSupportInbox,
+  });
 
+  final AppRole role;
   final IsdpRepository? repository;
   final AppUserProfile? userProfile;
+  final VoidCallback? onOpenSupportInbox;
 
   @override
   State<_SupportScreen> createState() => _SupportScreenState();
@@ -920,69 +972,85 @@ class _SupportScreenState extends State<_SupportScreen> {
           ],
         ),
         const SizedBox(height: 12),
-        const _SectionCard(
+        _SectionCard(
           title: 'Frequently Asked Questions',
           children: [
-            _FaqItem(
+            const _FaqItem(
               question: 'Why are my jobs not showing?',
               answer:
-                  'Check your internet connection and reopen the Jobs screen. The app may show cached jobs while it reconnects. If the problem continues, send Admin a support message below.',
+                  'Check your internet connection and reopen the Jobs screen. The app may show cached jobs while it reconnects.',
             ),
-            _FaqItem(
+            const _FaqItem(
               question: 'Can I resubmit a rejected job?',
               answer:
                   'Yes. Open the rejected job, review the rejection reason, correct the required information, and resubmit it for approval.',
             ),
-            _FaqItem(
+            const _FaqItem(
               question: 'What should I do if pictures will not upload?',
               answer:
                   'Confirm that the phone has internet access and that the app can access photos or the camera. Keep the app open while the upload completes.',
             ),
-            _FaqItem(
+            const _FaqItem(
               question: 'How do I get an invoice PDF?',
               answer:
                   'Open the completed job invoice, review it in the app, then use the PDF download or share action.',
             ),
             _FaqItem(
               question: 'How do I contact support?',
-              answer:
-                  'Send a message using Message Admin below, or email $supportContactEmail.',
+              answer: widget.role == AppRole.admin
+                  ? 'Use the Support Inbox below to review user requests, or email $supportContactEmail for account assistance.'
+                  : 'Send a message using Message Admin below, or email $supportContactEmail.',
             ),
           ],
         ),
         const SizedBox(height: 12),
-        _SectionCard(
-          title: 'Message Admin',
-          children: [
-            TextField(
-              controller: _messageController,
-              minLines: 3,
-              maxLines: 6,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(
-                labelText: 'Support message',
-                hintText: 'Describe what you need help with',
-                prefixIcon: Icon(Icons.support_agent_outlined),
-              ),
-            ),
-            const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: _sending || widget.repository == null
+        if (widget.role == AppRole.admin)
+          _SectionCard(
+            title: 'Support Management',
+            children: [
+              _NavRow(
+                icon: Icons.inbox_outlined,
+                title: 'Open Support Inbox',
+                subtitle: 'Review and respond to user support messages',
+                onTap: widget.onOpenSupportInbox == null
                     ? null
-                    : _sendMessage,
-                icon: Icon(_sending ? Icons.hourglass_empty : Icons.send),
-                label: const Text('Send to Admin'),
+                    : _openSupportInbox,
               ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Admins will see this in the Support Inbox marked as sent via support.',
-              style: TextStyle(color: AppTheme.muted, fontSize: 12),
-            ),
-          ],
-        ),
+            ],
+          )
+        else
+          _SectionCard(
+            title: 'Message Admin',
+            children: [
+              TextField(
+                controller: _messageController,
+                minLines: 3,
+                maxLines: 6,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  labelText: 'Support message',
+                  hintText: 'Describe what you need help with',
+                  prefixIcon: Icon(Icons.support_agent_outlined),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _sending || widget.repository == null
+                      ? null
+                      : _sendMessage,
+                  icon: Icon(_sending ? Icons.hourglass_empty : Icons.send),
+                  label: const Text('Send to Admin'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Admins will see this in the Support Inbox marked as sent via support.',
+                style: TextStyle(color: AppTheme.muted, fontSize: 12),
+              ),
+            ],
+          ),
         const SizedBox(height: 12),
         const _SectionCard(
           title: 'Help With',
@@ -1006,6 +1074,11 @@ class _SupportScreenState extends State<_SupportScreen> {
         ),
       ],
     );
+  }
+
+  void _openSupportInbox() {
+    Navigator.of(context).pop();
+    widget.onOpenSupportInbox?.call();
   }
 
   Future<void> _sendMessage() async {
@@ -1075,6 +1148,11 @@ class _AppSettingsScreenState extends State<_AppSettingsScreen> {
                   icon: Icons.apps_outlined,
                   title: 'App',
                   subtitle: 'PHEPHA MV ISDP',
+                ),
+                const _InfoRow(
+                  icon: Icons.business_outlined,
+                  title: 'Developed and Supported By',
+                  subtitle: 'Softwap (Pty) Ltd — info@softwap.co.za',
                 ),
                 _InfoRow(
                   icon: Icons.new_releases_outlined,
@@ -1146,6 +1224,9 @@ class _AppSettingsScreenState extends State<_AppSettingsScreen> {
                   Text(
                     'Integrated Service Delivery Platform for field service workflows.',
                   ),
+                  SizedBox(height: 8),
+                  Text('Developed and supported by Softwap (Pty) Ltd.'),
+                  Text('info@softwap.co.za'),
                 ],
               );
             },

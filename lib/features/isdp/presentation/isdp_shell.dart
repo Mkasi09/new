@@ -234,6 +234,9 @@ class _IsdpShellState extends State<IsdpShell> {
                 userProfile: widget.userProfile,
                 authRepository: widget.authRepository,
                 repository: _repository,
+                onOpenSupportInbox: _role == AppRole.admin
+                    ? _openSupportInboxScreen
+                    : null,
               ),
             ];
 

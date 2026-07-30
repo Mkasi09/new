@@ -10,7 +10,7 @@ before submitting the answers in Play Console.
   data required for account and field-service functionality.
 - **Is all collected user data encrypted in transit?** Yes.
 - **Can users request deletion of their data?** Yes, by emailing
-  itsupport@phephasecurity.co.za. Account provisioning and closure are managed
+  info@softwap.co.za. Account provisioning and closure are managed
   by authorised administrators.
 - **Does the app sell user data?** No.
 - **Is data used for advertising or marketing?** No.

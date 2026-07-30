@@ -1,12 +1,13 @@
 # PHEPHA MV ISDP Privacy Policy
 
 **Effective date:** 7 July 2026  
-**Contact:** itsupport@phephasecurity.co.za
+**Technical support and privacy contact:** Softwap (Pty) Ltd, info@softwap.co.za
 
-PHEPHA MV ("we", "our", or "us") provides PHEPHA MV ISDP, an internal
-field-service application used to create, assign, execute, review, and approve
-work orders. This policy explains how information is handled when authorised
-employees, contractors, and service personnel use the application.
+PHEPHA MV provides PHEPHA MV ISDP, an internal field-service application used
+to create, assign, execute, review, and approve work orders. Softwap (Pty) Ltd
+develops and provides technical support for the application. This policy
+explains how information is handled when authorised employees, contractors,
+and service personnel use the application.
 
 ## Information we collect
 
@@ -85,7 +86,7 @@ audit requirements, dispute handling, and security. Local cached work-order
 data can be cleared from the app and is removed when the app is uninstalled.
 
 To request access, correction, deletion, or restriction of personal
-information, email **itsupport@phephasecurity.co.za**. Requests may require
+information, email **info@softwap.co.za**. Requests may require
 identity and authority verification. Some information may be retained where
 required by law, contract, security, or legitimate audit needs. Because user
 accounts are provisioned by authorised administrators, account closure requests
@@ -106,6 +107,6 @@ published.
 
 For privacy questions or requests, contact:
 
-**PHEPHA MV ISDP Support**  
-**Email:** itsupport@phephasecurity.co.za
+**Softwap (Pty) Ltd — PHEPHA MV ISDP Support**  
+**Email:** info@softwap.co.za
 
