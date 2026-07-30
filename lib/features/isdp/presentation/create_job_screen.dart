@@ -55,7 +55,7 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
                       icon: Icons.add_task,
                       title: 'New Job',
                       subtitle:
-                          'Capture the job details. QR routing and supervisor assignment run automatically.',
+                          'Capture the job details and assign one supervisor or all supervisors.',
                     ),
                     const SizedBox(height: 14),
                     Card(
@@ -141,7 +141,7 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
                               decoration: const InputDecoration(
                                 labelText: 'Assign supervisor',
                                 helperText:
-                                    'Choose who must review and accept this job.',
+                                    'Choose one supervisor or notify all supervisors.',
                                 prefixIcon: Icon(
                                   Icons.supervisor_account_outlined,
                                 ),
@@ -149,7 +149,7 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
                               items: [
                                 const DropdownMenuItem<String>(
                                   value: null,
-                                  child: Text('Shared supervisor queue'),
+                                  child: Text('All supervisors'),
                                 ),
                                 ...widget.supervisors.map(
                                   (supervisor) => DropdownMenuItem<String>(

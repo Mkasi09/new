@@ -4,8 +4,10 @@
 
 The `createUser` callable sends the new user's temporary password by SMTP.
 The `notifyWorkOrderUpdate` trigger emails active supervisors as soon as a new
-job enters the supervisor queue, before it is accepted. It also emails
-technicians when they are newly assigned to a job.
+job enters the supervisor queue, before it is accepted. A job assigned to a
+specific supervisor only emails that supervisor; selecting all supervisors
+emails every active supervisor. It also emails technicians when they are newly
+assigned to a job.
 
 The scheduled `monitorWorkOrderSla` function runs every 15 minutes. It:
 
