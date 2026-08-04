@@ -1,56 +1,66 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import 'app/isdp_app.dart';
 import 'core/firebase/firebase_bootstrap.dart';
+import 'core/domain/app_role.dart';
+import 'features/auth/domain/auth_repository.dart';
+import 'features/auth/presentation/login_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
     await FirebaseBootstrap.initialize();
     runApp(const IsdpApp());
-  } catch (error) {
-    runApp(_StartupFailureApp(error: error));
+  } catch (_) {
+    // Keep the presentation usable even while a Firebase project is being
+    // configured. Sign-in is disabled until initialization succeeds.
+    runApp(
+      IsdpApp(home: LoginScreen(authRepository: _UnavailableAuthRepository())),
+    );
   }
 }
 
-class _StartupFailureApp extends StatelessWidget {
-  const _StartupFailureApp({required this.error});
-
-  final Object error;
+class _UnavailableAuthRepository implements AuthRepository {
+  Never get _unavailable =>
+      throw StateError('Sign-in is currently unavailable.');
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: Scaffold(
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.cloud_off_outlined, size: 48),
-                const SizedBox(height: 16),
-                const Text(
-                  'Firebase setup is incomplete',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'For Android, put the new google-services.json file in android/app and rebuild the app.',
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  error.toString(),
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.black54, fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  Stream<User?> authStateChanges() => const Stream.empty();
+
+  @override
+  Future<void> changePassword(String newPassword) async => _unavailable;
+
+  @override
+  Future<void> changePasswordWithCurrentPassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async => _unavailable;
+
+  @override
+  Future<void> createUser({
+    required String name,
+    required String email,
+    required String temporaryPassword,
+    required AppRole role,
+    String? team,
+  }) async => _unavailable;
+
+  @override
+  Future<AppUserProfile> currentUserProfile() async => _unavailable;
+
+  @override
+  Future<List<AppUserProfile>> listUsers() async => _unavailable;
+
+  @override
+  Future<void> sendPasswordResetEmail(String email) async => _unavailable;
+
+  @override
+  Future<void> signIn({
+    required String email,
+    required String password,
+  }) async => _unavailable;
+
+  @override
+  Future<void> signOut() async {}
 }
