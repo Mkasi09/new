@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "371100956227",
+    "project_id": "test-isdp-1",
+    "storage_bucket": "test-isdp-1.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:371100956227:android:00933567253b79e74fc6f6",
+        "android_client_info": {
+          "package_name": "com.fieldservice.platform"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCYbQoEjVw7RocXugNpbPbeir4ZONJeWW4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
