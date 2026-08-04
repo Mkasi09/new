@@ -7,7 +7,7 @@ import '../../../core/support/support_contact.dart';
 import '../../auth/domain/auth_repository.dart';
 import 'widgets/form_scaffold.dart';
 
-const defaultTemporaryPassword = 'PHEPHA MV';
+const defaultTemporaryPassword = 'Field Service Platform';
 
 class AddUserScreen extends StatefulWidget {
   const AddUserScreen({
@@ -281,7 +281,7 @@ class _AddUserScreenState extends State<AddUserScreen> {
     return '''
 $greeting,
 
-Your PHEPHA MV ISDP account has been created.
+Your Field Service Platform account has been created.
 
 Email: ${_emailController.text.trim()}
 Temporary password: ${_passwordController.text}

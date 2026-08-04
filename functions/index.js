@@ -23,7 +23,7 @@ const smtpFrom = defineString("SMTP_FROM");
 const smtpUser = defineSecret("SMTP_USER");
 const smtpPass = defineSecret("SMTP_PASS");
 const smtpSecrets = [smtpUser, smtpPass];
-const DEFAULT_TEMPORARY_PASSWORD = "PHEPHA MV";
+const DEFAULT_TEMPORARY_PASSWORD = "Field Service Platform";
 
 exports.createUser = onCall({ secrets: smtpSecrets }, async (request) => {
   if (!request.auth) {
@@ -119,11 +119,11 @@ function createSmtpTransporter() {
 async function sendNewUserEmail({ email, name, role, temporaryPassword }) {
   const transporter = createSmtpTransporter();
   const safeName = cleanString(name) || "ISDP User";
-  const subject = "Your PHEPHA MV ISDP account";
+  const subject = "Your Field Service Platform account";
   const text = [
     `Hello ${safeName},`,
     "",
-    "Your PHEPHA MV ISDP account has been created.",
+    "Your Field Service Platform account has been created.",
     "",
     `Email: ${email}`,
     `Temporary password: ${temporaryPassword}`,
@@ -144,7 +144,7 @@ async function sendNewUserEmail({ email, name, role, temporaryPassword }) {
 function emailHtml({ safeName, email, role, temporaryPassword }) {
   return `
     <p>Hello ${escapeHtml(safeName)},</p>
-    <p>Your PHEPHA MV ISDP account has been created.</p>
+    <p>Your Field Service Platform account has been created.</p>
     <p>
       <strong>Email:</strong> ${escapeHtml(email)}<br>
       <strong>Temporary password:</strong> ${escapeHtml(temporaryPassword)}<br>
@@ -256,7 +256,7 @@ function assignmentEmailMessage({ orderId, order, assignment, user, email }) {
   const text = [
     `Hello ${name},`,
     "",
-    `You have been assigned as ${roleLabel} for this PHEPHA MV ISDP job.`,
+    `You have been assigned as ${roleLabel} for this Field Service Platform job.`,
     "",
     ...details,
     "",
@@ -275,7 +275,7 @@ function assignmentEmailMessage({ orderId, order, assignment, user, email }) {
 function assignmentEmailHtml({ name, roleLabel, details }) {
   return `
     <p>Hello ${escapeHtml(name)},</p>
-    <p>You have been assigned as ${escapeHtml(roleLabel)} for this PHEPHA MV ISDP job.</p>
+    <p>You have been assigned as ${escapeHtml(roleLabel)} for this Field Service Platform job.</p>
     <ul>
       ${details.map((detail) => `<li>${escapeHtml(detail)}</li>`).join("")}
     </ul>

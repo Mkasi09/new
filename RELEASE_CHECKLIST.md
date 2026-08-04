@@ -7,7 +7,7 @@
 - Android debug APK builds.
 - Android release compilation and App Bundle packaging pass with the production upload key.
 - Windows admin analysis, tests, and release build pass.
-- Final Android package and iOS bundle ID are `za.co.phephamv.isdp`.
+- Set the final Android package and iOS bundle ID for the new company.
 - Matching Firebase Android and iOS applications are registered.
 - Firestore rules, indexes, Storage rules, and all Cloud Functions are deployed.
 - Firestore and Storage access is restricted by role and work-order assignment.
@@ -30,9 +30,9 @@ flutter build appbundle --release --no-pub
 ## Required before distributing iOS
 
 - Open `ios/Runner.xcworkspace` on macOS with Xcode.
-- Select the PHEPHA MV Apple Developer team.
+- Select the new company's Apple Developer team.
 - Enable Push Notifications and Background Modes / Remote notifications.
-- Confirm the App Store provisioning profile for `za.co.phephamv.isdp`.
+- Confirm the App Store provisioning profile for the new bundle ID.
 - Archive and validate through Xcode.
 
 ## Required before public or organization-wide rollout

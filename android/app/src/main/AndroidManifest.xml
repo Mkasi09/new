@@ -4,9 +4,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
     <application
-        android:label="PHEPHA MV ISDP"
+        android:label="Field Service Platform"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@android:drawable/ic_menu_manage">
         <activity
             android:name=".MainActivity"
             android:exported="true"

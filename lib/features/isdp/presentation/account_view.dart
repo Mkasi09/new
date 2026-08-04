@@ -189,7 +189,11 @@ class _AccountHeader extends StatelessWidget {
                     borderRadius: BorderRadius.circular(18),
                     border: Border.all(color: AppTheme.border),
                   ),
-                  child: Image.asset('assets/logo1.png'),
+                  child: const Icon(
+                    Icons.engineering_outlined,
+                    size: 44,
+                    color: AppTheme.primary,
+                  ),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
@@ -1147,7 +1151,7 @@ class _AppSettingsScreenState extends State<_AppSettingsScreen> {
                 const _InfoRow(
                   icon: Icons.apps_outlined,
                   title: 'App',
-                  subtitle: 'PHEPHA MV ISDP',
+                  subtitle: 'Field Service Platform',
                 ),
                 const _InfoRow(
                   icon: Icons.business_outlined,
@@ -1212,13 +1216,13 @@ class _AppSettingsScreenState extends State<_AppSettingsScreen> {
               if (!context.mounted) return;
               showAboutDialog(
                 context: context,
-                applicationName: 'PHEPHA MV ISDP',
+                applicationName: 'Field Service Platform',
                 applicationVersion:
                     '${packageInfo.version}+${packageInfo.buildNumber}',
-                applicationIcon: Image.asset(
-                  'assets/logo.png',
-                  width: 48,
-                  height: 48,
+                applicationIcon: const Icon(
+                  Icons.engineering_outlined,
+                  size: 48,
+                  color: AppTheme.primary,
                 ),
                 children: const [
                   Text(
@@ -1581,7 +1585,7 @@ class _BrandTitle extends StatelessWidget {
     return Text.rich(
       const TextSpan(
         children: [
-          TextSpan(text: 'PHEPHA MV '),
+          TextSpan(text: 'Field Service Platform '),
           TextSpan(
             text: 'ISDP',
             style: TextStyle(color: Colors.red),

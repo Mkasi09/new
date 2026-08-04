@@ -494,10 +494,6 @@ Future<Uint8List> _buildInvoicePdf({
   required String invoiceId,
   required Map<String, dynamic> data,
 }) async {
-  final logoBytes = (await rootBundle.load(
-    'assets/logo.png',
-  )).buffer.asUint8List();
-  final logo = pw.MemoryImage(logoBytes);
   final number = data['number'] as String? ?? invoiceId;
   final customer = data['customerName'] as String? ?? 'Customer';
   final email = data['customerEmail'] as String? ?? '';
@@ -514,7 +510,7 @@ Future<Uint8List> _buildInvoicePdf({
   final total = (data['total'] as num?)?.toDouble() ?? subtotal + tax;
   final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
   final dueAt = (data['dueAt'] as Timestamp?)?.toDate();
-  final document = pw.Document(title: number, author: 'PHEPHA MV ISDP');
+  final document = pw.Document(title: number, author: 'Field Service Platform');
 
   document.addPage(
     pw.MultiPage(
@@ -525,25 +521,19 @@ Future<Uint8List> _buildInvoicePdf({
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
           children: [
-            pw.Row(
+            pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
-                pw.Image(logo, width: 72, height: 52, fit: pw.BoxFit.contain),
-                pw.SizedBox(width: 14),
-                pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Text(
-                      'PHEPHA MV ISDP',
-                      style: pw.TextStyle(
-                        fontSize: 19,
-                        fontWeight: pw.FontWeight.bold,
-                        color: PdfColors.blueGrey900,
-                      ),
-                    ),
-                    pw.SizedBox(height: 4),
-                    pw.Text('Integrated Service Delivery Platform'),
-                  ],
+                pw.Text(
+                  'Field Service Platform',
+                  style: pw.TextStyle(
+                    fontSize: 19,
+                    fontWeight: pw.FontWeight.bold,
+                    color: PdfColors.blueGrey900,
+                  ),
                 ),
+                pw.SizedBox(height: 4),
+                pw.Text('Integrated Service Delivery Platform'),
               ],
             ),
             pw.Column(

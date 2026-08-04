@@ -22,7 +22,7 @@ Set non-secret params in `functions/.env` before deploying:
 SMTP_HOST=smtp.example.com
 SMTP_PORT=587
 SMTP_SECURE=false
-SMTP_FROM="PHEPHA MV ISDP <no-reply@example.com>"
+SMTP_FROM="Field Service Platform <no-reply@example.com>"
 ```
 
 Set SMTP credentials as Firebase secrets:

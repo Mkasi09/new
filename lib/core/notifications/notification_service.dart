@@ -33,7 +33,7 @@ class NotificationService {
   const NotificationService._();
 
   static const MethodChannel _deviceServices = MethodChannel(
-    'za.co.phephamv.isdp/device_services',
+    'com.fieldservice.platform/device_services',
   );
   static final FirebaseMessaging _messaging = FirebaseMessaging.instance;
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;

@@ -129,7 +129,7 @@ void main() {
       IsdpApp(home: IsdpShell(isdpRepository: _TestIsdpRepository())),
     );
 
-    expect(find.text('PHEPHA MV ISDP'), findsOneWidget);
+    expect(find.text('Field Service Platform'), findsOneWidget);
     expect(find.text('Today'), findsWidgets);
     expect(find.text('Next Steps'), findsOneWidget);
     expect(find.textContaining('Time left'), findsOneWidget);

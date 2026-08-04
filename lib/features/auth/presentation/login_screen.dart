@@ -97,7 +97,7 @@ class _LoginScreenState extends State<LoginScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Check your email'),
         content: Text(
-          'If $email is registered for PHEPHA MV ISDP, a secure password reset link has been sent. Open the email and follow the link to create a new password.',
+          'If $email is registered for Field Service Platform, a secure password reset link has been sent. Open the email and follow the link to create a new password.',
         ),
         actions: [
           FilledButton(
@@ -172,20 +172,16 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ],
           ),
-          child: Image.asset('assets/logo1.png'),
+          child: const Icon(
+            Icons.engineering_outlined,
+            size: 52,
+            color: AppTheme.primary,
+          ),
         ),
         const SizedBox(height: 18),
-        Text.rich(
-          const TextSpan(
-            children: [
-              TextSpan(text: 'PHEPHA MV '),
-              TextSpan(
-                text: 'ISDP',
-                style: TextStyle(color: Colors.red),
-              ),
-            ],
-          ),
-          style: const TextStyle(
+        const Text(
+          'Field Service Platform',
+          style: TextStyle(
             color: AppTheme.ink,
             fontSize: 27,
             fontWeight: FontWeight.w900,

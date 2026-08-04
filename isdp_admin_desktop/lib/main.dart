@@ -10,8 +10,8 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:qr_flutter/qr_flutter.dart';
 
-const _firebaseApiKey = 'AIzaSyDR2jT8OaKsPJI-mdjQqRi88kWOdT3lVKY';
-const _firebaseProjectId = 'phepha-mv-isdp';
+const _firebaseApiKey = String.fromEnvironment('FIREBASE_API_KEY');
+const _firebaseProjectId = String.fromEnvironment('FIREBASE_PROJECT_ID');
 const _supportContactNumber = '0791762956';
 const _supportContactMessage = 'Contact $_supportContactNumber.';
 
@@ -28,7 +28,7 @@ class IsdpAdminApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'PHEPHA MV ISDP Admin',
+      title: 'Field Service Platform Admin',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: AppColors.primary,
@@ -4198,13 +4198,13 @@ class _BillingViewState extends State<BillingView> {
       final attachment = await _writeInvoicePdfAttachment(invoice, order);
       await _openOutlookDraftWithAttachment(
         recipient: invoice.customerEmail,
-        subject: 'Invoice ${invoice.number} - PHEPHA MV ISDP',
+        subject: 'Invoice ${invoice.number} - Field Service Platform',
         body:
             'Dear ${invoice.customerName},\r\n\r\n'
             'Please find attached invoice ${invoice.number} for ${_billingMoney(invoice.total)}. '
             'Payment is due by ${_dateLabel(invoice.dueAt)}.\r\n\r\n'
             'Please use ${invoice.number} as the payment reference.\r\n\r\n'
-            'Regards,\r\nPHEPHA MV ISDP',
+            'Regards,\r\nField Service Platform',
         attachmentPath: attachment.path,
       );
       if (!mounted) return;
@@ -7782,11 +7782,11 @@ class _BrandLogo extends StatelessWidget {
               ]
             : null,
       ),
-      child: Image.asset(
-        'assets/logo1.png',
-        fit: BoxFit.contain,
-        filterQuality: FilterQuality.high,
-        semanticLabel: 'PHEPHA MV ISDP logo',
+      child: Icon(
+        Icons.engineering_outlined,
+        size: size * 0.62,
+        color: AppColors.primary,
+        semanticLabel: 'Field Service Platform',
       ),
     );
   }
@@ -7803,7 +7803,7 @@ class _BrandName extends StatelessWidget {
     return Text.rich(
       TextSpan(
         children: [
-          const TextSpan(text: 'PHEPHA MV '),
+          const TextSpan(text: 'Field Service Platform '),
           const TextSpan(
             text: 'ISDP',
             style: TextStyle(color: AppColors.primary),
@@ -7868,13 +7868,10 @@ class _AnimatedLogoLoaderState extends State<_AnimatedLogoLoader>
                           ),
                         ),
                       ),
-                      Padding(
-                        padding: EdgeInsets.all(widget.size * 0.12),
-                        child: Image.asset(
-                          'assets/logo1.png',
-                          fit: BoxFit.contain,
-                          filterQuality: FilterQuality.high,
-                        ),
+                      Icon(
+                        Icons.engineering_outlined,
+                        size: widget.size * 0.48,
+                        color: AppColors.primary,
                       ),
                     ],
                   ),
@@ -8003,7 +8000,7 @@ String adminSummary(List<WorkOrder> orders, List<AdminUserProfile> users) {
   final submitted = orders.where((order) => order.status == 'Submitted').length;
   final activeUsers = users.where((user) => !user.disabled).length;
   return [
-    'PHEPHA MV ISDP admin summary',
+    'Field Service Platform admin summary',
     'Generated: ${DateTime.now().toIso8601String()}',
     'Total jobs: ${orders.length}',
     'Open jobs: $open',
@@ -8201,13 +8198,9 @@ Future<File> _writeInvoicePdfAttachment(
 }
 
 Future<List<int>> buildInvoicePdfBytes(Invoice invoice, WorkOrder order) async {
-  final logoBytes = (await rootBundle.load(
-    'assets/logo1.png',
-  )).buffer.asUint8List();
-  final logo = pw.MemoryImage(logoBytes);
   final document = pw.Document(
     title: invoice.number,
-    author: 'PHEPHA MV ISDP',
+    author: 'Field Service Platform',
     subject: 'Invoice for ${invoice.workOrderId}',
   );
   final accent = PdfColors.blueGrey800;
@@ -8228,7 +8221,7 @@ Future<List<int>> buildInvoicePdfBytes(Invoice invoice, WorkOrder order) async {
         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
         children: [
           pw.Text(
-            'PHEPHA MV ISDP | Support: $_supportContactNumber',
+            'Field Service Platform | Support: $_supportContactNumber',
             style: pw.TextStyle(fontSize: 8, color: muted),
           ),
           pw.Text(
@@ -8242,26 +8235,20 @@ Future<List<int>> buildInvoicePdfBytes(Invoice invoice, WorkOrder order) async {
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
           children: [
-            pw.Row(
+            pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
-                pw.Image(logo, width: 72, height: 52, fit: pw.BoxFit.contain),
-                pw.SizedBox(width: 14),
-                pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Text(
-                      'PHEPHA MV ISDP',
-                      style: pw.TextStyle(
-                        fontSize: 20,
-                        fontWeight: pw.FontWeight.bold,
-                        color: accent,
-                      ),
-                    ),
-                    pw.Text(
-                      'Field service operations',
-                      style: pw.TextStyle(color: muted),
-                    ),
-                  ],
+                pw.Text(
+                  'Field Service Platform',
+                  style: pw.TextStyle(
+                    fontSize: 20,
+                    fontWeight: pw.FontWeight.bold,
+                    color: accent,
+                  ),
+                ),
+                pw.Text(
+                  'Field service operations',
+                  style: pw.TextStyle(color: muted),
                 ),
               ],
             ),
@@ -8576,10 +8563,6 @@ String _safeQrFileId(WorkOrder order) {
 }
 
 Future<List<int>> _buildQrPdfBytes(WorkOrder order) async {
-  final logoBytes = (await rootBundle.load(
-    'assets/logo1.png',
-  )).buffer.asUint8List();
-  final logo = pw.MemoryImage(logoBytes);
   final document = pw.Document();
   document.addPage(
     pw.Page(
@@ -8587,24 +8570,17 @@ Future<List<int>> _buildQrPdfBytes(WorkOrder order) async {
       build: (context) => pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          pw.Row(
-            crossAxisAlignment: pw.CrossAxisAlignment.center,
+          pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              pw.Image(logo, width: 76, height: 54, fit: pw.BoxFit.contain),
-              pw.SizedBox(width: 16),
-              pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.Text(
-                    'PHEPHA MV ISDP',
-                    style: pw.TextStyle(
-                      fontSize: 24,
-                      fontWeight: pw.FontWeight.bold,
-                    ),
-                  ),
-                  pw.Text('Site identification QR'),
-                ],
+              pw.Text(
+                'Field Service Platform',
+                style: pw.TextStyle(
+                  fontSize: 24,
+                  fontWeight: pw.FontWeight.bold,
+                ),
               ),
+              pw.Text('Site identification QR'),
             ],
           ),
           pw.Divider(),

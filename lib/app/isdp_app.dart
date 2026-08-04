@@ -14,7 +14,7 @@ class IsdpApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'PHEPHA MV ISDP',
+      title: 'Field Service Platform',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       home:

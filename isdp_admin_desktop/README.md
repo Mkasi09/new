@@ -1,6 +1,6 @@
-# PHEPHA MV ISDP Admin Desktop
+# Field Service Platform Admin Desktop
 
-Separate Flutter desktop project for the PHEPHA MV ISDP admin console.
+Separate Flutter desktop project for the Field Service Platform admin console.
 
 This app is built for desktop and talks to the existing cloud backend through
 secure APIs, so Windows can sign in and manage the same `work_orders`

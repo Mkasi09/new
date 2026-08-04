@@ -67,13 +67,10 @@ class _AnimatedLogoLoaderState extends State<AnimatedLogoLoader>
                           ),
                         ),
                       ),
-                      Padding(
-                        padding: EdgeInsets.all(widget.size * 0.12),
-                        child: Image.asset(
-                          'assets/logo1.png',
-                          fit: BoxFit.contain,
-                          filterQuality: FilterQuality.high,
-                        ),
+                      Icon(
+                        Icons.engineering_outlined,
+                        size: widget.size * 0.48,
+                        color: Theme.of(context).colorScheme.primary,
                       ),
                     ],
                   ),

@@ -303,7 +303,7 @@ class _IsdpShellState extends State<IsdpShell> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Exit app?'),
-        content: const Text('Do you want to close PHEPHA MV ISDP?'),
+        content: const Text('Do you want to close Field Service Platform?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
@@ -864,7 +864,7 @@ class _IsdpShellState extends State<IsdpShell> {
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
             pw.Text(
-              'PHEPHA MV ISDP Job QR',
+              'Field Service Platform Job QR',
               style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold),
             ),
             pw.SizedBox(height: 12),
@@ -1773,16 +1773,8 @@ class _AppBarBrandTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text.rich(
-      const TextSpan(
-        children: [
-          TextSpan(text: 'PHEPHA MV '),
-          TextSpan(
-            text: 'ISDP',
-            style: TextStyle(color: Colors.red, fontWeight: FontWeight.w900),
-          ),
-        ],
-      ),
+    return const Text(
+      'Field Service',
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
     );

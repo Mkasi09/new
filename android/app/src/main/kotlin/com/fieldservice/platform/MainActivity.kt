@@ -1,4 +1,4 @@
-package za.co.phephamv.isdp
+package com.fieldservice.platform
 
 import android.content.pm.PackageManager
 import android.os.Build
@@ -12,7 +12,7 @@ class MainActivity : FlutterActivity() {
 
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
-            "za.co.phephamv.isdp/device_services"
+            "com.fieldservice.platform/device_services"
         ).setMethodCallHandler { call, result ->
             when (call.method) {
                 "isGooglePlayServicesAvailable" -> {

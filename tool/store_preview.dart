@@ -13,7 +13,7 @@ void main() {
         initialRole: AppRole.admin,
         userProfile: const AppUserProfile(
           uid: 'store-preview-admin',
-          email: 'admin@phephamv.co.za',
+          email: 'admin@example.com',
           role: AppRole.admin,
           name: 'Operations Admin',
           team: 'Operations',
