@@ -14,10 +14,10 @@ import 'package:flutter/foundation.dart'
 /// ```
 class DefaultFirebaseOptions {
   static bool get isConfigured =>
-      const String.fromEnvironment('FIREBASE_API_KEY').isNotEmpty &&
-      const String.fromEnvironment('FIREBASE_APP_ID').isNotEmpty &&
-      const String.fromEnvironment('FIREBASE_MESSAGING_SENDER_ID').isNotEmpty &&
-      const String.fromEnvironment('FIREBASE_PROJECT_ID').isNotEmpty;
+      android.apiKey.isNotEmpty &&
+      android.appId.isNotEmpty &&
+      android.messagingSenderId.isNotEmpty &&
+      android.projectId.isNotEmpty;
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) {
       return web;
@@ -50,11 +50,11 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: String.fromEnvironment('FIREBASE_API_KEY'),
-    appId: String.fromEnvironment('FIREBASE_APP_ID'),
-    messagingSenderId: String.fromEnvironment('FIREBASE_MESSAGING_SENDER_ID'),
-    projectId: String.fromEnvironment('FIREBASE_PROJECT_ID'),
-    storageBucket: String.fromEnvironment('FIREBASE_STORAGE_BUCKET'),
+    apiKey: 'AIzaSyCYbQoEjVw7RocXugNpbPbeir4ZONJeWW4',
+    appId: '1:371100956227:android:00933567253b79e74fc6f6',
+    messagingSenderId: '371100956227',
+    projectId: 'test-isdp-1',
+    storageBucket: 'test-isdp-1.firebasestorage.app',
   );
 
   static const FirebaseOptions web = FirebaseOptions(
