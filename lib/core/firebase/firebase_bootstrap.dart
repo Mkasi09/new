@@ -6,14 +6,15 @@ class FirebaseBootstrap {
   const FirebaseBootstrap._();
 
   static Future<void> initialize() async {
-    if (!DefaultFirebaseOptions.isConfigured) {
-      throw StateError(
-        'Firebase is not configured. Add the new company Firebase values as '
-        '--dart-define options before running the app.',
+    if (DefaultFirebaseOptions.isConfigured) {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
       );
+      return;
     }
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
+
+    // Android and iOS read their native Firebase configuration files here.
+    // For Android, place google-services.json in android/app.
+    await Firebase.initializeApp();
   }
 }
