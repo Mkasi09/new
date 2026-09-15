@@ -1,13 +1,10 @@
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../../core/domain/app_role.dart';
 import '../../../core/support/support_contact.dart';
 import '../../auth/domain/auth_repository.dart';
 import 'widgets/form_scaffold.dart';
-
-const defaultTemporaryPassword = 'PHEPHA MV';
 
 class AddUserScreen extends StatefulWidget {
   const AddUserScreen({
@@ -28,23 +25,14 @@ class _AddUserScreenState extends State<AddUserScreen> {
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _teamController = TextEditingController();
-  final _passwordController = TextEditingController();
   AppRole _role = AppRole.technician;
   bool _saving = false;
-  bool _obscurePassword = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _passwordController.text = defaultTemporaryPassword;
-  }
 
   @override
   void dispose() {
     _nameController.dispose();
     _emailController.dispose();
     _teamController.dispose();
-    _passwordController.dispose();
     super.dispose();
   }
 
@@ -56,7 +44,6 @@ class _AddUserScreenState extends State<AddUserScreen> {
       await widget.authRepository.createUser(
         name: _nameController.text,
         email: _emailController.text,
-        temporaryPassword: _passwordController.text,
         role: _role,
         team: _teamController.text.isEmpty ? null : _teamController.text,
       );
@@ -100,7 +87,7 @@ class _AddUserScreenState extends State<AddUserScreen> {
                         icon: Icons.person_add_alt_1_outlined,
                         title: 'Add User',
                         subtitle:
-                            'Create an account with the required default password: "$defaultTemporaryPassword". The user must replace it at first sign-in.',
+                            'A random temporary password is emailed to the user. They must replace it at first sign-in.',
                       ),
                       const SizedBox(height: 14),
                       Card(
@@ -165,40 +152,6 @@ class _AddUserScreenState extends State<AddUserScreen> {
                                   prefixIcon: Icon(Icons.groups_outlined),
                                 ),
                               ),
-                              const SizedBox(height: 12),
-                              const Align(
-                                alignment: Alignment.centerLeft,
-                                child: Text(
-                                  'Admin notice: default password is "$defaultTemporaryPassword".',
-                                  style: TextStyle(fontWeight: FontWeight.w700),
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              TextFormField(
-                                controller: _passwordController,
-                                readOnly: true,
-                                obscureText: _obscurePassword,
-                                decoration: InputDecoration(
-                                  labelText: 'Default password for new users',
-                                  helperText:
-                                      'Tell the admin clearly: every new user starts with "$defaultTemporaryPassword".',
-                                  prefixIcon: const Icon(Icons.password),
-                                  suffixIcon: IconButton(
-                                    onPressed: () => setState(
-                                      () =>
-                                          _obscurePassword = !_obscurePassword,
-                                    ),
-                                    icon: Icon(
-                                      _obscurePassword
-                                          ? Icons.visibility_outlined
-                                          : Icons.visibility_off_outlined,
-                                    ),
-                                  ),
-                                ),
-                                validator: (value) => (value?.length ?? 0) < 8
-                                    ? 'Use at least 8 characters.'
-                                    : null,
-                              ),
                             ],
                           ),
                         ),
@@ -238,34 +191,12 @@ class _AddUserScreenState extends State<AddUserScreen> {
           children: [
             Text(_emailController.text.trim()),
             const SizedBox(height: 12),
-            const Text('Temporary password:'),
-            SelectableText(
-              _passwordController.text,
-              style: const TextStyle(fontWeight: FontWeight.w900),
-            ),
-            const SizedBox(height: 8),
-            const Text('The user must change it after signing in.'),
-            const SizedBox(height: 8),
             const Text(
-              'The user has been emailed this password automatically.',
+              'Tell the user: check your email for your temporary password, sign in, then create a new password.',
             ),
           ],
         ),
         actions: [
-          TextButton.icon(
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: _newUserEmailMessage()));
-            },
-            icon: const Icon(Icons.email_outlined),
-            label: const Text('Copy Email Message'),
-          ),
-          TextButton.icon(
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: _passwordController.text));
-            },
-            icon: const Icon(Icons.copy),
-            label: const Text('Copy Password'),
-          ),
           FilledButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Done'),
@@ -273,22 +204,6 @@ class _AddUserScreenState extends State<AddUserScreen> {
         ],
       ),
     );
-  }
-
-  String _newUserEmailMessage() {
-    final name = _nameController.text.trim();
-    final greeting = name.isEmpty ? 'Hello' : 'Hello $name';
-    return '''
-$greeting,
-
-Your PHEPHA MV ISDP account has been created.
-
-Email: ${_emailController.text.trim()}
-Temporary password: ${_passwordController.text}
-
-Please sign in and change this password immediately.
-'''
-        .trim();
   }
 
   void _showError(String message) {

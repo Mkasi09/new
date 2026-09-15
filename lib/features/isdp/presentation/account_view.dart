@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -770,6 +771,15 @@ class _NotificationSettingsScreenState
   NotificationRegistrationStatus? _status;
   String? _lastError;
   bool _checking = false;
+  bool _emailEnabled = true;
+  bool _pushEnabled = true;
+  bool _loadingPreferences = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPreferences();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -785,6 +795,28 @@ class _NotificationSettingsScreenState
       icon: Icons.notifications_outlined,
       subtitle: 'Register this phone for job updates and approval alerts.',
       children: [
+        _SectionCard(
+          title: 'Delivery Preferences',
+          children: [
+            SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.email_outlined),
+              title: const Text('Email alerts'),
+              subtitle: const Text('Assignments and deadline reminders'),
+              value: _emailEnabled,
+              onChanged: _loadingPreferences ? null : _setEmailEnabled,
+            ),
+            SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.notifications_active_outlined),
+              title: const Text('Phone alerts'),
+              subtitle: const Text('Job updates on this device'),
+              value: _pushEnabled,
+              onChanged: _loadingPreferences ? null : _setPushEnabled,
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
         _SectionCard(
           title: 'Device Status',
           children: [
@@ -883,6 +915,62 @@ class _NotificationSettingsScreenState
         ),
       ],
     };
+  }
+
+  Future<void> _loadPreferences() async {
+    final userId = widget.userId;
+    if (userId == null) {
+      if (mounted) setState(() => _loadingPreferences = false);
+      return;
+    }
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .get();
+      final preferences = snapshot.data()?['notificationPreferences']
+          as Map<String, dynamic>?;
+      if (!mounted) return;
+      setState(() {
+        _emailEnabled = preferences?['email'] != false;
+        _pushEnabled = preferences?['push'] != false;
+        _loadingPreferences = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadingPreferences = false);
+    }
+  }
+
+  Future<void> _setEmailEnabled(bool enabled) =>
+      _savePreferences(email: enabled);
+
+  Future<void> _setPushEnabled(bool enabled) =>
+      _savePreferences(push: enabled);
+
+  Future<void> _savePreferences({bool? email, bool? push}) async {
+    final userId = widget.userId;
+    if (userId == null) return;
+    setState(() {
+      if (email != null) _emailEnabled = email;
+      if (push != null) _pushEnabled = push;
+    });
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(userId).update({
+        'notificationPreferences': {
+          'email': _emailEnabled,
+          'push': _pushEnabled,
+        },
+        'notificationsUpdatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {
+      if (!mounted) return;
+      await _loadPreferences();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save notification preferences.')),
+        );
+      }
+    }
   }
 
   Future<void> _registerThisPhone() async {

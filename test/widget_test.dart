@@ -61,7 +61,7 @@ void main() {
     ]);
   });
 
-  testWidgets('add user uses the required default password', (tester) async {
+  testWidgets('add user emails a random temporary password', (tester) async {
     final authRepository = _TestAuthRepository();
 
     await tester.pumpWidget(
@@ -73,8 +73,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.textContaining(defaultTemporaryPassword), findsWidgets);
-    expect(find.textContaining('required default password'), findsOneWidget);
+    expect(find.textContaining('random temporary password'), findsOneWidget);
+    expect(find.text('Default password for new users'), findsNothing);
 
     await tester.enterText(find.byType(TextFormField).at(0), 'Test User');
     await tester.enterText(
@@ -84,9 +84,13 @@ void main() {
     await tester.tap(find.text('Create User'));
     await tester.pumpAndSettle();
 
-    expect(authRepository.createdTemporaryPassword, defaultTemporaryPassword);
+    expect(authRepository.createdName, 'Test User');
+    expect(authRepository.createdEmail, 'test.user@example.com');
     expect(find.text('User created'), findsOneWidget);
-    expect(find.textContaining(defaultTemporaryPassword), findsWidgets);
+    expect(
+      find.textContaining('Tell the user: check your email'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('full-screen signature paints while drawing', (tester) async {
@@ -525,7 +529,6 @@ mixin _RepositoryTestStubs {
 class _TestAuthRepository implements AuthRepository {
   String? createdName;
   String? createdEmail;
-  String? createdTemporaryPassword;
   AppRole? createdRole;
   String? createdTeam;
 
@@ -545,13 +548,11 @@ class _TestAuthRepository implements AuthRepository {
   Future<void> createUser({
     required String name,
     required String email,
-    required String temporaryPassword,
     required AppRole role,
     String? team,
   }) async {
     createdName = name;
     createdEmail = email;
-    createdTemporaryPassword = temporaryPassword;
     createdRole = role;
     createdTeam = team;
   }

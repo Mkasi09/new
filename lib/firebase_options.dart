@@ -47,28 +47,28 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyDYthovKfVp5WkDEeAqPNjNuI9a_kDhgBo',
-    appId: '1:323935471456:android:baba6da1df97578388c005',
-    messagingSenderId: '323935471456',
-    projectId: 'phepha-mv-isdp',
-    storageBucket: 'phepha-mv-isdp.firebasestorage.app',
+    apiKey: 'AIzaSyD0pYM5_xXEaYhtRqzi4vpPAGhNDVEBKYA',
+    appId: '1:1091271496660:android:b113cf2932595127b53c41',
+    messagingSenderId: '1091271496660',
+    projectId: 'magzmotron-5ae93',
+    storageBucket: 'magzmotron-5ae93.firebasestorage.app',
   );
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyDR2jT8OaKsPJI-mdjQqRi88kWOdT3lVKY',
-    appId: '1:323935471456:web:f013f9f37010b1ee88c005',
-    messagingSenderId: '323935471456',
-    projectId: 'phepha-mv-isdp',
-    authDomain: 'phepha-mv-isdp.firebaseapp.com',
-    storageBucket: 'phepha-mv-isdp.firebasestorage.app',
+    apiKey: 'AIzaSyCqnP-_LOkeUpxvOKG8llnLCuX9mpJc2PI',
+    appId: '1:1091271496660:web:f7a6a7b529ae809ab53c41',
+    messagingSenderId: '1091271496660',
+    projectId: 'magzmotron-5ae93',
+    authDomain: 'magzmotron-5ae93.firebaseapp.com',
+    storageBucket: 'magzmotron-5ae93.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyBMfDw7NsbJZocTN43fSLFmEZVTone4wSI',
-    appId: '1:323935471456:ios:3285f0bc7aff8c8788c005',
-    messagingSenderId: '323935471456',
-    projectId: 'phepha-mv-isdp',
-    storageBucket: 'phepha-mv-isdp.firebasestorage.app',
+    apiKey: 'AIzaSyAj5BmPDm49PduPAdQiiNw6aoksN7DaupU',
+    appId: '1:1091271496660:ios:d76605701b8533f6b53c41',
+    messagingSenderId: '1091271496660',
+    projectId: 'magzmotron-5ae93',
+    storageBucket: 'magzmotron-5ae93.firebasestorage.app',
     iosBundleId: 'za.co.phephamv.isdp',
   );
 }

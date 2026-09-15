@@ -13,7 +13,7 @@ class FirebaseAuthRepository implements AuthRepository {
   }) : _firebaseAuth = firebaseAuth ?? FirebaseAuth.instance,
        _firestore = firestore ?? FirebaseFirestore.instance,
        _functions =
-           functions ?? FirebaseFunctions.instanceFor(region: 'africa-south1');
+           functions ?? FirebaseFunctions.instanceFor(region: 'us-central1');
 
   final FirebaseAuth _firebaseAuth;
   final FirebaseFirestore _firestore;
@@ -121,14 +121,12 @@ class FirebaseAuthRepository implements AuthRepository {
   Future<void> createUser({
     required String name,
     required String email,
-    required String temporaryPassword,
     required AppRole role,
     String? team,
   }) async {
     await _functions.httpsCallable('createUser').call(<String, Object?>{
       'name': name.trim(),
       'email': email.trim().toLowerCase(),
-      'temporaryPassword': temporaryPassword,
       'role': role.name,
       'team': team?.trim(),
     });

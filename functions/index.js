@@ -7,10 +7,11 @@ const { FieldValue, getFirestore } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 const { defineSecret, defineString } = require("firebase-functions/params");
 const { setGlobalOptions } = require("firebase-functions/v2/options");
+const { randomInt } = require("node:crypto");
 const nodemailer = require("nodemailer");
 const { huaweiPushUrl } = require("./huawei_push");
 
-setGlobalOptions({ region: "africa-south1" });
+setGlobalOptions({ region: "us-central1" });
 initializeApp();
 
 const huaweiAppId = defineString("HUAWEI_APP_ID");
@@ -23,7 +24,8 @@ const smtpFrom = defineString("SMTP_FROM");
 const smtpUser = defineSecret("SMTP_USER");
 const smtpPass = defineSecret("SMTP_PASS");
 const smtpSecrets = [smtpUser, smtpPass];
-const DEFAULT_TEMPORARY_PASSWORD = "PHEPHA MV";
+const TEMPORARY_PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
+const EMAIL_DELIVERY_LEASE_MS = 15 * 60 * 1000;
 
 exports.createUser = onCall({ secrets: smtpSecrets }, async (request) => {
   if (!request.auth) {
@@ -49,12 +51,13 @@ exports.createUser = onCall({ secrets: smtpSecrets }, async (request) => {
     throw new HttpsError("invalid-argument", "Select a valid user role.");
   }
   assertSmtpConfigured();
+  const temporaryPassword = createTemporaryPassword();
 
   let user;
   try {
     user = await getAuth().createUser({
       email,
-      password: DEFAULT_TEMPORARY_PASSWORD,
+      password: temporaryPassword,
       displayName: name,
       emailVerified: false,
     });
@@ -65,6 +68,10 @@ exports.createUser = onCall({ secrets: smtpSecrets }, async (request) => {
       role,
       team: team || null,
       mustChangePassword: true,
+      notificationPreferences: {
+        email: true,
+        push: true,
+      },
       createdAt: FieldValue.serverTimestamp(),
       createdBy: request.auth.uid,
     });
@@ -73,7 +80,8 @@ exports.createUser = onCall({ secrets: smtpSecrets }, async (request) => {
       email,
       name,
       role,
-      temporaryPassword: DEFAULT_TEMPORARY_PASSWORD,
+      temporaryPassword,
+      deliveryId: `account-created:${user.uid}`,
     });
     return { uid: user.uid, emailSent: true };
   } catch (error) {
@@ -116,8 +124,14 @@ function createSmtpTransporter() {
   });
 }
 
-async function sendNewUserEmail({ email, name, role, temporaryPassword }) {
-  const transporter = createSmtpTransporter();
+function createTemporaryPassword() {
+  return Array.from(
+    { length: 18 },
+    () => TEMPORARY_PASSWORD_ALPHABET[randomInt(TEMPORARY_PASSWORD_ALPHABET.length)],
+  ).join("");
+}
+
+async function sendNewUserEmail({ email, name, role, temporaryPassword, deliveryId }) {
   const safeName = cleanString(name) || "ISDP User";
   const subject = "Your PHEPHA MV ISDP account";
   const text = [
@@ -132,12 +146,17 @@ async function sendNewUserEmail({ email, name, role, temporaryPassword }) {
     "Please sign in and change this password immediately.",
   ].join("\n");
 
-  await transporter.sendMail({
-    from: cleanString(smtpFrom.value()),
-    to: email,
-    subject,
-    text,
-    html: emailHtml({ safeName, email, role, temporaryPassword }),
+  await sendTrackedEmail(getFirestore(), {
+    deliveryId,
+    category: "account_created",
+    recipient: { email, name: safeName },
+    message: {
+      from: cleanString(smtpFrom.value()),
+      to: email,
+      subject,
+      text,
+      html: emailHtml({ safeName, email, role, temporaryPassword }),
+    },
   });
 }
 
@@ -154,7 +173,7 @@ function emailHtml({ safeName, email, role, temporaryPassword }) {
   `;
 }
 
-async function sendAssignmentEmails(db, orderId, before, after) {
+async function sendAssignmentEmails(db, orderId, before, after, eventId) {
   if (!isSmtpConfigured()) {
     console.warn("Assignment email skipped because SMTP is not configured.", { orderId });
     return;
@@ -190,22 +209,31 @@ async function sendAssignmentEmails(db, orderId, before, after) {
     .map((assignment) => {
       const user = usersById.get(assignment.userId);
       const email = cleanString(user?.email);
-      if (!email.includes("@")) return null;
-      return assignmentEmailMessage({
-        orderId,
-        order: after,
-        assignment,
-        user,
-        email,
-      });
+      if (!email.includes("@") || !emailNotificationsEnabled(user)) return null;
+      return {
+        deliveryId: `assignment:${eventId}:${assignment.userId}`,
+        recipient: { email, name: cleanString(user?.name) || "ISDP User" },
+        message: assignmentEmailMessage({
+          orderId,
+          order: after,
+          assignment,
+          user,
+          email,
+        }),
+      };
     })
     .filter(Boolean);
 
   if (messages.length === 0) return;
 
-  const transporter = createSmtpTransporter();
   const results = await Promise.allSettled(
-    messages.map((message) => transporter.sendMail(message)),
+    messages.map(({ deliveryId, recipient, message }) => sendTrackedEmail(db, {
+      deliveryId,
+      category: "assignment",
+      orderId,
+      recipient,
+      message,
+    })),
   );
   const failures = results.filter((result) => result.status === "rejected");
   if (failures.length > 0) {
@@ -294,7 +322,7 @@ exports.notifyWorkOrderUpdate = onDocumentWritten(
     if (!after) return;
 
     const db = getFirestore();
-    await sendAssignmentEmails(db, event.params.orderId, before, after);
+    await sendAssignmentEmails(db, event.params.orderId, before, after, event.id);
 
     const notification = notificationForWorkOrder(event.params.orderId, before, after);
     if (notification) {
@@ -349,59 +377,77 @@ exports.monitorWorkOrderSla = onSchedule(
       const status = cleanString(order.status);
       const createdAt = dateValue(order.createdAt);
       const dueAt = dateValue(order.dueAt);
+      const hasPreviousSupervisorReminder = Boolean(order.supervisorReminderAt);
+      const supervisorReminderCount = Number.isInteger(order.supervisorReminderCount)
+        ? order.supervisorReminderCount
+        : hasPreviousSupervisorReminder ? 1 : 0;
+      const supervisorReminderWaitMs = hasPreviousSupervisorReminder
+        ? 24 * 60 * 60 * 1000
+        : 12 * 60 * 60 * 1000;
 
       if (status === "Assigned to Supervisor" &&
           createdAt &&
           now.getTime() - createdAt.getTime() >= 12 * 60 * 60 * 1000 &&
           now.getTime() - createdAt.getTime() <= 3 * 24 * 60 * 60 * 1000 &&
-          reminderIsDue(order.supervisorReminderAt, now, 12 * 60 * 60 * 1000)) {
+          supervisorReminderCount < 2 &&
+          reminderIsDue(order.supervisorReminderAt, now, supervisorReminderWaitMs)) {
         const recipients = await supervisorRecipients(db, order);
-        await sendOperationalAlert({
+        const result = await sendOperationalAlert({
           db,
           recipients,
           orderId: orderDoc.id,
           order,
           type: "supervisor_acceptance_reminder",
+          deliverySlot: supervisorReminderCount,
           title: "Job awaiting acceptance",
           body: `${cleanString(order.site) || orderDoc.id} still needs supervisor acceptance.`,
         });
-        await orderDoc.ref.update({
-          supervisorReminderAt: FieldValue.serverTimestamp(),
-        });
+        if (result.emailComplete) {
+          await orderDoc.ref.update({
+            supervisorReminderAt: FieldValue.serverTimestamp(),
+            supervisorReminderCount: supervisorReminderCount + 1,
+          });
+        }
       }
 
       if (dueAt && dueAt.getTime() > now.getTime() &&
           dueAt.getTime() - now.getTime() <= 2 * 60 * 60 * 1000 &&
           !order.slaWarningAt) {
         const recipients = await supervisorRecipients(db, order);
-        await sendOperationalAlert({
+        const result = await sendOperationalAlert({
           db,
           recipients,
           orderId: orderDoc.id,
           order,
           type: "sla_approaching",
+          deliverySlot: "first",
           title: "SLA deadline approaching",
           body: `${cleanString(order.site) || orderDoc.id} is due within 2 hours.`,
         });
-        await orderDoc.ref.update({
-          slaWarningAt: FieldValue.serverTimestamp(),
-        });
+        if (result.emailComplete) {
+          await orderDoc.ref.update({
+            slaWarningAt: FieldValue.serverTimestamp(),
+          });
+        }
       }
 
       if (dueAt && dueAt.getTime() <= now.getTime() && !order.overdueEscalatedAt) {
         const recipients = await activeUsersByRole(db, "admin");
-        await sendOperationalAlert({
+        const result = await sendOperationalAlert({
           db,
           recipients,
           orderId: orderDoc.id,
           order,
           type: "sla_overdue",
+          deliverySlot: "first",
           title: "SLA overdue",
           body: `${cleanString(order.site) || orderDoc.id} has exceeded its SLA deadline.`,
         });
-        await orderDoc.ref.update({
-          overdueEscalatedAt: FieldValue.serverTimestamp(),
-        });
+        if (result.emailComplete) {
+          await orderDoc.ref.update({
+            overdueEscalatedAt: FieldValue.serverTimestamp(),
+          });
+        }
       }
     }
   },
@@ -424,14 +470,16 @@ async function activeUsersByRole(db, role) {
 }
 
 async function sendOperationalAlert({
+  db,
   recipients,
   orderId,
   order,
   type,
+  deliverySlot,
   title,
   body,
 }) {
-  if (recipients.length === 0) return;
+  if (recipients.length === 0) return { emailComplete: true };
 
   const tokens = tokensForUsers(recipients);
   if (tokens.fcm.length > 0 || tokens.hms.length > 0) {
@@ -445,30 +493,97 @@ async function sendOperationalAlert({
     });
   }
 
-  if (!isSmtpConfigured()) return;
+  if (!isSmtpConfigured()) return { emailComplete: false };
   const emails = recipients
+    .filter((doc) => emailNotificationsEnabled(doc.data()))
     .map((doc) => ({
+      id: doc.id,
       email: cleanString(doc.data()?.email),
       name: cleanString(doc.data()?.name) || "ISDP User",
     }))
     .filter((recipient) => recipient.email.includes("@"));
-  if (emails.length === 0) return;
+  if (emails.length === 0) return { emailComplete: true };
 
-  const transporter = createSmtpTransporter();
-  await Promise.allSettled(
-    emails.map((recipient) => transporter.sendMail({
-      from: cleanString(smtpFrom.value()),
-      to: recipient.email,
-      subject: title,
-      text: `Hello ${recipient.name},\n\n${body}\n\nJob ID: ${orderId}\n\nPlease open the ISDP app for details.`,
-      html: `
+  const results = await Promise.allSettled(
+    emails.map((recipient) => sendTrackedEmail(db, {
+      deliveryId: `alert:${type}:${orderId}:${deliverySlot}:${recipient.id}`,
+      category: type,
+      orderId,
+      recipient,
+      message: {
+        from: cleanString(smtpFrom.value()),
+        to: recipient.email,
+        subject: title,
+        text: `Hello ${recipient.name},\n\n${body}\n\nJob ID: ${orderId}\n\nPlease open the ISDP app for details.`,
+        html: `
         <p>Hello ${escapeHtml(recipient.name)},</p>
         <p>${escapeHtml(body)}</p>
         <p><strong>Job ID:</strong> ${escapeHtml(orderId)}</p>
         <p>Please open the ISDP app for details.</p>
-      `,
+        `,
+      },
     })),
   );
+  const failures = results.filter((result) => result.status === "rejected");
+  const incomplete = results.some((result) =>
+    result.status === "rejected" || result.value.status === "pending",
+  );
+  if (failures.length > 0) {
+    console.warn("Some operational alert emails failed", {
+      orderId,
+      type,
+      sent: results.length - failures.length,
+      failed: failures.length,
+    });
+  }
+  return { emailComplete: !incomplete };
+}
+
+async function sendTrackedEmail(db, { deliveryId, category, orderId = null, recipient, message }) {
+  const deliveryRef = db.collection("email_deliveries").doc(deliveryId);
+  const now = new Date();
+  const canSend = await db.runTransaction(async (transaction) => {
+    const existing = await transaction.get(deliveryRef);
+    const delivery = existing.data();
+    const lastAttempt = dateValue(delivery?.lastAttemptAt);
+    const pending = delivery?.status === "pending" && lastAttempt &&
+      now.getTime() - lastAttempt.getTime() < EMAIL_DELIVERY_LEASE_MS;
+    if (delivery?.status === "sent") return "already_sent";
+    if (pending) return "pending";
+
+    transaction.set(deliveryRef, {
+      category,
+      orderId,
+      recipientEmail: recipient.email,
+      recipientName: recipient.name,
+      status: "pending",
+      lastAttemptAt: now,
+      attempts: FieldValue.increment(1),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    return "ready";
+  });
+  if (canSend !== "ready") return { status: canSend };
+
+  try {
+    const result = await createSmtpTransporter().sendMail(message);
+    await deliveryRef.set({
+      status: "sent",
+      providerMessageId: cleanString(result.messageId) || null,
+      sentAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+      lastError: FieldValue.delete(),
+    }, { merge: true });
+    return { status: "sent" };
+  } catch (error) {
+    await deliveryRef.set({
+      status: "failed",
+      lastError: cleanString(error.message) || "Email delivery failed.",
+      failedAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    throw error;
+  }
 }
 
 function reminderIsDue(lastSentAt, now, intervalMs) {
@@ -705,6 +820,7 @@ function tokensForUsers(users) {
   const hms = new Set();
   for (const user of users) {
     const data = user.data();
+    if (!pushNotificationsEnabled(data)) continue;
     for (const token of Array.isArray(data.fcmTokens) ? data.fcmTokens : []) {
       if (cleanString(token)) fcm.add(cleanString(token));
     }
@@ -726,6 +842,14 @@ function tokensForUsers(users) {
     fcm: Array.from(fcm),
     hms: Array.from(hms),
   };
+}
+
+function emailNotificationsEnabled(user) {
+  return user?.notificationPreferences?.email !== false;
+}
+
+function pushNotificationsEnabled(user) {
+  return user?.notificationPreferences?.push !== false;
 }
 
 async function sendToTokens(tokens, message) {

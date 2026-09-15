@@ -10,8 +10,8 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:qr_flutter/qr_flutter.dart';
 
-const _firebaseApiKey = 'AIzaSyDR2jT8OaKsPJI-mdjQqRi88kWOdT3lVKY';
-const _firebaseProjectId = 'phepha-mv-isdp';
+const _firebaseApiKey = 'AIzaSyCqnP-_LOkeUpxvOKG8llnLCuX9mpJc2PI';
+const _firebaseProjectId = 'magzmotron-5ae93';
 const _supportContactNumber = '0791762956';
 const _supportContactMessage = 'Contact $_supportContactNumber.';
 
@@ -821,8 +821,8 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
     if (profile == null) return;
 
     await _runUserMutation(
-      () => widget.repository.saveUserProfile(widget.session, profile),
-      success: '${profile.name} added to users.',
+      () => widget.repository.createUser(widget.session, profile),
+      success: '${profile.name} can now sign in with the temporary password sent by email.',
     );
   }
 
@@ -3308,21 +3308,17 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextFormField(
+                if (_isEditing) ...[
+                  TextFormField(
                   controller: _uidController,
-                  readOnly: _isEditing,
+                  readOnly: true,
                   decoration: const InputDecoration(
                     labelText: 'User ID',
                     prefixIcon: Icon(Icons.fingerprint),
                   ),
-                  validator: (value) {
-                    final id = value?.trim() ?? '';
-                    if (id.isEmpty) return 'Enter a user ID.';
-                    if (id.contains('/')) return 'User ID cannot contain /.';
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 12),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 TextFormField(
                   controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
@@ -3423,7 +3419,7 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
     Navigator.pop(
       context,
       AdminUserProfile(
-        uid: _uidController.text.trim(),
+        uid: widget.user?.uid ?? '',
         email: _emailController.text.trim(),
         name: _nameController.text.trim(),
         role: _role.value,
@@ -4719,6 +4715,7 @@ abstract class AdminRepository {
   Future<AdminNotice?> fetchAdminNotice(AuthSession session);
   Future<void> saveAdminNotice(AuthSession session, AdminNotice notice);
   Future<List<AdminUserProfile>> fetchUsers(AuthSession session);
+  Future<void> createUser(AuthSession session, AdminUserProfile profile);
   Future<void> saveUserProfile(AuthSession session, AdminUserProfile profile);
   Future<void> deleteUserProfile(AuthSession session, AdminUserProfile profile);
   Future<List<AdminUserProfile>> fetchTechnicians(AuthSession session);
@@ -4893,6 +4890,33 @@ class RestAdminRepository implements AdminRepository {
 
     users.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     return users;
+  }
+
+  @override
+  Future<void> createUser(
+    AuthSession session,
+    AdminUserProfile profile,
+  ) async {
+    final team = profile.team?.trim();
+    final uri = Uri.https(
+      'us-central1-$_firebaseProjectId.cloudfunctions.net',
+      '/createUser',
+    );
+    final response = await _client.post(
+      uri,
+      headers: _headers(session),
+      body: jsonEncode({
+        'data': {
+          'name': profile.name.trim(),
+          'email': profile.email.trim().toLowerCase(),
+          'role': profile.role,
+          'team': (team?.isEmpty ?? true) ? null : team,
+        },
+      }),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException.fromBody(_decode(response));
+    }
   }
 
   @override

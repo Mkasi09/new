@@ -41,7 +41,6 @@ abstract class AuthRepository {
   Future<void> createUser({
     required String name,
     required String email,
-    required String temporaryPassword,
     required AppRole role,
     String? team,
   });

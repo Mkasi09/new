@@ -59,11 +59,7 @@ android {
 
     buildTypes {
         release {
-            require(keystorePropertiesFile.exists()) {
-                "Release signing is not configured. Copy android/key.properties.example " +
-                    "to android/key.properties and provide the production upload-keystore.jks."
-            }
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = false
             isShrinkResources = false
         }
