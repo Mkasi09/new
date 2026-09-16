@@ -24,6 +24,7 @@ class _QrArrivalScanScreenState extends State<QrArrivalScanScreen> {
   final MobileScannerController _controller = MobileScannerController();
   bool _handled = false;
   bool _matched = false;
+  bool _enteringCode = false;
   String? _lastError;
 
   @override
@@ -33,7 +34,7 @@ class _QrArrivalScanScreenState extends State<QrArrivalScanScreen> {
   }
 
   void _onDetect(BarcodeCapture capture) {
-    if (_handled) return;
+    if (_handled || _enteringCode) return;
 
     for (final barcode in capture.barcodes) {
       final value = barcode.rawValue?.trim();
@@ -46,6 +47,61 @@ class _QrArrivalScanScreenState extends State<QrArrivalScanScreen> {
       }
       return;
     }
+  }
+
+  Future<void> _enterCodeManually() async {
+    final formKey = GlobalKey<FormState>();
+    var enteredCode = '';
+    _enteringCode = true;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Enter site code'),
+        content: Form(
+          key: formKey,
+          child: TextFormField(
+            autofocus: true,
+            autocorrect: false,
+            enableSuggestions: false,
+            textInputAction: TextInputAction.done,
+            decoration: const InputDecoration(
+              labelText: 'Site code',
+              helperText: 'Enter the code printed below the site QR.',
+            ),
+            onChanged: (value) => enteredCode = value.trim(),
+            validator: (_) {
+              if (enteredCode.isEmpty) return 'Enter the site code.';
+              if (enteredCode != widget.order.siteCode) {
+                return 'Code does not match this job.';
+              }
+              return null;
+            },
+            onFieldSubmitted: (_) {
+              if (formKey.currentState!.validate()) {
+                Navigator.pop(dialogContext, true);
+              }
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (formKey.currentState!.validate()) {
+                Navigator.pop(dialogContext, true);
+              }
+            },
+            child: const Text('Confirm arrival'),
+          ),
+        ],
+      ),
+    );
+    _enteringCode = false;
+    if (!mounted || confirmed != true) return;
+    _showMatched();
   }
 
   @override
@@ -144,12 +200,19 @@ class _QrArrivalScanScreenState extends State<QrArrivalScanScreen> {
                             icon: const Icon(Icons.today_outlined),
                             label: const Text('Proceed'),
                           )
-                        else
+                        else ...[
                           const Text(
                             'Point the camera at the QR code displayed at this site.',
                             textAlign: TextAlign.center,
                             style: TextStyle(fontWeight: FontWeight.w700),
                           ),
+                          const SizedBox(height: 8),
+                          OutlinedButton.icon(
+                            onPressed: _enterCodeManually,
+                            icon: const Icon(Icons.keyboard_outlined),
+                            label: const Text('Enter code manually'),
+                          ),
+                        ],
                       ],
                     ),
                   ),

@@ -108,6 +108,103 @@ void main() {
     expect(find.textContaining('Matsapha Office Block'), findsWidgets);
   });
 
+  testWidgets('technician can open the shared create-job form', (tester) async {
+    await tester.pumpWidget(
+      IsdpApp(home: IsdpShell(isdpRepository: _TestIsdpRepository())),
+    );
+
+    await tester.tap(find.byKey(const Key('technician-create-job-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('New Job'), findsOneWidget);
+    expect(find.text('Site name'), findsOneWidget);
+    expect(find.text('Work scope'), findsOneWidget);
+  });
+
+  testWidgets('technician can create a job with an empty queue', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      IsdpApp(
+        home: IsdpShell(
+          initialRole: AppRole.technician,
+          isdpRepository: _EmptyIsdpRepository(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('empty-create-job-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('New Job'), findsOneWidget);
+  });
+
+  testWidgets('technician sees a created job awaiting supervisor', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      IsdpApp(
+        home: IsdpShell(
+          initialRole: AppRole.technician,
+          userProfile: const AppUserProfile(
+            uid: 'creator-1',
+            email: 'creator@example.com',
+            name: 'Creator',
+            role: AppRole.technician,
+          ),
+          isdpRepository: _CreatedJobRepository(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Sent to supervisor for review and assignment.'),
+      findsOneWidget,
+    );
+    expect(find.text('Confirm arrival'), findsNothing);
+
+    await tester.tap(find.text('Jobs'));
+    await tester.pumpAndSettle();
+    expect(find.text('Creator Site'), findsOneWidget);
+  });
+
+  testWidgets('new technician job remains visible after creation', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      IsdpApp(
+        home: IsdpShell(
+          initialRole: AppRole.technician,
+          userProfile: const AppUserProfile(
+            uid: 'creator-1',
+            email: 'creator@example.com',
+            name: 'Creator',
+            role: AppRole.technician,
+          ),
+          isdpRepository: _EmptyIsdpRepository(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('empty-create-job-button')));
+    await tester.pumpAndSettle();
+
+    final fields = find.byType(TextField);
+    await tester.enterText(fields.at(0), 'New Creator Site');
+    await tester.enterText(fields.at(1), 'Main Road');
+    await tester.enterText(fields.at(2), 'Inspect equipment');
+    await tester.tap(find.widgetWithText(FilledButton, 'Create Job'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('New Creator Site'), findsWidgets);
+    expect(
+      find.text('Sent to supervisor for review and assignment.'),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('technician countdown runs before arrival scan', (tester) async {
     await tester.pumpWidget(
       IsdpApp(home: IsdpShell(isdpRepository: _UnscannedJobRepository())),
@@ -490,6 +587,26 @@ mixin _RepositoryTestStubs {
   Future<void> markSupportMessagesRead() async {}
 
   Future<void> clearLocalCache() async {}
+}
+
+class _CreatedJobRepository extends _TestIsdpRepository {
+  final _createdJob = const WorkOrder(
+    id: 'JOB-CREATED-1',
+    site: 'Creator Site',
+    address: 'Main Road',
+    scope: 'Inspect equipment',
+    sla: 'Due tomorrow',
+    siteCode: 'SITE-CREATED-1',
+    status: 'Assigned to Supervisor',
+    priority: Priority.high,
+    createdBy: 'creator-1',
+  );
+
+  @override
+  List<WorkOrder> getWorkOrders() => [_createdJob];
+
+  @override
+  Stream<List<WorkOrder>> watchWorkOrders() => Stream.value([_createdJob]);
 }
 
 class _TestIsdpRepository with _RepositoryTestStubs implements IsdpRepository {

@@ -11,6 +11,7 @@ class DashboardView extends StatefulWidget {
     super.key,
     required this.role,
     required this.selectedOrder,
+    required this.canWorkOnSelectedOrder,
     required this.workOrders,
     required this.repository,
     required this.jobSteps,
@@ -38,6 +39,7 @@ class DashboardView extends StatefulWidget {
 
   final AppRole role;
   final WorkOrder selectedOrder;
+  final bool canWorkOnSelectedOrder;
   final List<WorkOrder> workOrders;
   final IsdpRepository repository;
   final List<JobStep> jobSteps;
@@ -127,6 +129,8 @@ class _DashboardViewState extends State<DashboardView> {
       ),
       AppRole.technician => _TechnicianHome(
         order: widget.selectedOrder,
+        canWorkOnOrder: widget.canWorkOnSelectedOrder,
+        onCreateJob: widget.onCreateJob,
         pendingJobs: _pendingTechnicianJobs(widget.workOrders),
         jobSteps: widget.jobSteps,
         materials: widget.materials,
@@ -502,6 +506,8 @@ class _SupervisorHome extends StatelessWidget {
 class _TechnicianHome extends StatelessWidget {
   const _TechnicianHome({
     required this.order,
+    required this.canWorkOnOrder,
+    required this.onCreateJob,
     required this.pendingJobs,
     required this.jobSteps,
     required this.materials,
@@ -519,6 +525,8 @@ class _TechnicianHome extends StatelessWidget {
   });
 
   final WorkOrder order;
+  final bool canWorkOnOrder;
+  final VoidCallback onCreateJob;
   final int pendingJobs;
   final List<JobStep> jobSteps;
   final List<MaterialLine> materials;
@@ -536,6 +544,45 @@ class _TechnicianHome extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (!canWorkOnOrder) {
+      return AppScrollView(
+        children: [
+          FilledButton.icon(
+            key: const Key('technician-create-job-button'),
+            onPressed: onCreateJob,
+            icon: const Icon(Icons.add_task),
+            label: const Text('Create Job'),
+          ),
+          const SizedBox(height: 14),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Job status',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(order.site),
+                  const SizedBox(height: 4),
+                  Text(order.id),
+                  const SizedBox(height: 8),
+                  Text(order.status),
+                  if (order.status == 'Assigned to Supervisor') ...[
+                    const SizedBox(height: 8),
+                    const Text('Sent to supervisor for review and assignment.'),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _TechnicianJobDetails(order: order, onTap: () => onOpenOrder(order)),
+        ],
+      );
+    }
     final finalDecline = order.status == 'Declined - Closed';
     final submitted =
         order.status == 'Submitted' ||
@@ -557,6 +604,13 @@ class _TechnicianHome extends StatelessWidget {
 
     return AppScrollView(
       children: [
+        FilledButton.icon(
+          key: const Key('technician-create-job-button'),
+          onPressed: onCreateJob,
+          icon: const Icon(Icons.add_task),
+          label: const Text('Create Job'),
+        ),
+        const SizedBox(height: 14),
         _TodaySummaryCard(
           order: order,
           pendingJobs: pendingJobs,

@@ -192,6 +192,10 @@ class _IsdpShellState extends State<IsdpShell> {
                 DashboardView(
                   role: _role,
                   selectedOrder: selectedOrder,
+                  canWorkOnSelectedOrder:
+                      _role != AppRole.technician ||
+                      (_matchesCurrentTechnician(selectedOrder) &&
+                          _isTechnicianWorkStatus(selectedOrder.status)),
                   workOrders: visibleOrders,
                   repository: _repository,
                   jobSteps: _repository.getJobSteps(),
@@ -408,8 +412,24 @@ class _IsdpShellState extends State<IsdpShell> {
         orElse: () => orders.first,
       );
     }
+    if (_role == AppRole.technician) {
+      return orders.firstWhere(
+        (order) =>
+            _matchesCurrentTechnician(order) &&
+            _isTechnicianWorkStatus(order.status),
+        orElse: () => orders.first,
+      );
+    }
     return orders.first;
   }
+
+  bool _isTechnicianWorkStatus(String status) =>
+      status == 'Dispatched' ||
+      status == 'On Site' ||
+      status == 'Submitted' ||
+      status == 'Declined' ||
+      status == 'Declined - Closed' ||
+      status == 'Approved';
 
   List<WorkOrder> _visibleOrdersForRole(List<WorkOrder> orders) {
     return switch (_role) {
@@ -425,13 +445,9 @@ class _IsdpShellState extends State<IsdpShell> {
         orders
             .where(
               (order) =>
-                  _matchesCurrentTechnician(order) &&
-                  (order.status == 'Dispatched' ||
-                      order.status == 'On Site' ||
-                      order.status == 'Submitted' ||
-                      order.status == 'Declined' ||
-                      order.status == 'Declined - Closed' ||
-                      order.status == 'Approved'),
+                  _matchesCurrentUser(order.createdBy) ||
+                  (_matchesCurrentTechnician(order) &&
+                      _isTechnicianWorkStatus(order.status)),
             )
             .toList(),
     };
@@ -873,7 +889,19 @@ class _IsdpShellState extends State<IsdpShell> {
               ),
             ),
             pw.SizedBox(height: 24),
-            pw.Text('Scan this QR on site to confirm technician arrival.'),
+            pw.Center(
+              child: pw.Text(
+                'Site code: ${order.siteCode}',
+                style: pw.TextStyle(
+                  fontSize: 18,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+            ),
+            pw.SizedBox(height: 16),
+            pw.Text(
+              'Scan this QR or enter the site code manually to confirm technician arrival.',
+            ),
           ],
         ),
       ),
@@ -1043,7 +1071,11 @@ class _IsdpShellState extends State<IsdpShell> {
     if (!_pendingCreateIds.add(created.id)) return;
 
     try {
-      final saved = await _repository.createWorkOrder(created);
+      final saved = await _repository.createWorkOrder(
+        _role == AppRole.technician && widget.userProfile != null
+            ? created.copyWith(createdBy: widget.userProfile!.uid)
+            : created,
+      );
       if (!mounted) return;
       _knownOrders[saved.id] = saved;
       if (_navigationHistory.isNotEmpty) _navigationHistory.removeLast();

@@ -64,6 +64,7 @@ class FirebaseIsdpRepository implements IsdpRepository {
             .where('closedAt', isGreaterThanOrEqualTo: approvalCutoff),
       ],
       AppRole.technician => [
+        _workOrders.where('createdBy', isEqualTo: userId),
         _workOrders
             .where('assignedTechnicianIds', arrayContains: userId)
             .where('isOpen', isEqualTo: true),

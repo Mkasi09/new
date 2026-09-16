@@ -20,7 +20,7 @@ class EmptyJobsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final canCreate = role == AppRole.admin;
+    final canCreate = role == AppRole.admin || role == AppRole.technician;
     return SafeArea(
       child: Center(
         child: ConstrainedBox(
@@ -57,31 +57,32 @@ class EmptyJobsView extends StatelessWidget {
                       label: const Text('Create Job'),
                     ),
                     const SizedBox(height: 12),
-                    Wrap(
-                      alignment: WrapAlignment.center,
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        if (onOpenReviewQueue != null)
-                          OutlinedButton.icon(
-                            onPressed: onOpenReviewQueue,
-                            icon: const Icon(Icons.fact_check_outlined),
-                            label: const Text('Review'),
-                          ),
-                        if (onOpenAnalytics != null)
-                          OutlinedButton.icon(
-                            onPressed: onOpenAnalytics,
-                            icon: const Icon(Icons.analytics_outlined),
-                            label: const Text('Analytics'),
-                          ),
-                        if (onAddUser != null)
-                          OutlinedButton.icon(
-                            onPressed: onAddUser,
-                            icon: const Icon(Icons.person_add_alt_1_outlined),
-                            label: const Text('Add User'),
-                          ),
-                      ],
-                    ),
+                    if (role == AppRole.admin)
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          if (onOpenReviewQueue != null)
+                            OutlinedButton.icon(
+                              onPressed: onOpenReviewQueue,
+                              icon: const Icon(Icons.fact_check_outlined),
+                              label: const Text('Review'),
+                            ),
+                          if (onOpenAnalytics != null)
+                            OutlinedButton.icon(
+                              onPressed: onOpenAnalytics,
+                              icon: const Icon(Icons.analytics_outlined),
+                              label: const Text('Analytics'),
+                            ),
+                          if (onAddUser != null)
+                            OutlinedButton.icon(
+                              onPressed: onAddUser,
+                              icon: const Icon(Icons.person_add_alt_1_outlined),
+                              label: const Text('Add User'),
+                            ),
+                        ],
+                      ),
                   ],
                 ],
               ),
