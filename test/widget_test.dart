@@ -1,0 +1,1044 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
+import 'package:isdp/app/isdp_app.dart';
+import 'package:isdp/core/domain/app_role.dart';
+import 'package:isdp/features/auth/domain/auth_repository.dart';
+import 'package:isdp/features/isdp/domain/entities.dart';
+import 'package:isdp/features/isdp/domain/isdp_repository.dart';
+import 'package:isdp/features/isdp/presentation/assign_technician_screen.dart';
+import 'package:isdp/features/isdp/presentation/analytics_view.dart';
+import 'package:isdp/features/isdp/presentation/isdp_shell.dart';
+import 'package:isdp/features/isdp/presentation/job_chats_screen.dart';
+import 'package:isdp/features/isdp/presentation/completion_details_screen.dart';
+import 'package:isdp/features/isdp/presentation/upload_evidence_screen.dart';
+
+void main() {
+  test('evidence photos are resized and encoded as compact JPEGs', () async {
+    final source = img.Image(width: 1400, height: 900);
+    final compressed = await compressEvidenceImage(img.encodePng(source));
+    final decoded = img.decodeJpg(compressed);
+
+    expect(compressed.length, lessThanOrEqualTo(450000));
+    expect(decoded, isNotNull);
+    expect(decoded!.width, lessThanOrEqualTo(1024));
+    expect(decoded.height, lessThanOrEqualTo(1024));
+  });
+
+  test('work-order access fields survive serialization', () {
+    const order = WorkOrder(
+      id: 'WO-ACCESS',
+      site: 'Test site',
+      address: 'Test address',
+      scope: 'Test scope',
+      sla: 'Due in 24 hours',
+      siteCode: 'SITE-ACCESS',
+      status: 'Dispatched',
+      priority: Priority.high,
+      supervisorId: 'supervisor-1',
+      assignedTechnicianIds: ['technician-1'],
+      isOpen: true,
+    );
+
+    final restored = WorkOrder.fromMap(order.id, order.toMap());
+
+    expect(restored.supervisorId, 'supervisor-1');
+    expect(restored.assignedTechnicianIds, ['technician-1']);
+    expect(restored.isOpen, isTrue);
+  });
+
+  test('customer signature can be stored and restored', () {
+    final encoded = encodeSignature([
+      const [Offset(0.1, 0.2), Offset(0.8, 0.7)],
+    ]);
+
+    expect(decodeSignature(encoded), const [
+      [Offset(0.1, 0.2), Offset(0.8, 0.7)],
+    ]);
+  });
+
+  testWidgets('full-screen signature paints while drawing', (tester) async {
+    await tester.pumpWidget(
+      const IsdpApp(
+        home: FullScreenSignatureScreen(
+          initialStrokes: [],
+          customerName: 'Customer',
+        ),
+      ),
+    );
+
+    expect(find.text('SIGN HERE'), findsOneWidget);
+    expect(find.text('Use this signature'), findsOneWidget);
+
+    final start = tester.getCenter(find.text('SIGN HERE'));
+    final gesture = await tester.startGesture(start);
+    await gesture.moveBy(const Offset(160, 40));
+    await tester.pump();
+
+    expect(find.text('SIGN HERE'), findsNothing);
+    final paintedCanvas = find.byWidgetPredicate(
+      (widget) => widget is CustomPaint && widget.painter is SignaturePainter,
+    );
+    final canvasSize = tester.getSize(paintedCanvas);
+    expect(canvasSize.width, greaterThan(200));
+    expect(canvasSize.height, greaterThan(200));
+    final customPaint = tester.widget<CustomPaint>(paintedCanvas);
+    final painter = customPaint.painter! as SignaturePainter;
+    expect(painter.strokes.last.length, greaterThan(1));
+    final button = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Use this signature'),
+    );
+    expect(button.onPressed, isNotNull);
+    await gesture.up();
+  });
+
+  testWidgets('technician sees on-site workflow', (tester) async {
+    await tester.pumpWidget(
+      IsdpApp(home: IsdpShell(isdpRepository: _TestIsdpRepository())),
+    );
+
+    expect(find.text('INKOMATI-USUTHU ISDP'), findsOneWidget);
+    expect(find.text('Today'), findsWidgets);
+    expect(find.text('Next Steps'), findsOneWidget);
+    expect(find.textContaining('Time left'), findsOneWidget);
+    expect(find.text('Confirm arrival'), findsOneWidget);
+    expect(find.text('Upload before photo'), findsOneWidget);
+    expect(find.textContaining('Matsapha Office Block'), findsWidgets);
+  });
+
+  testWidgets('technician can open the shared create-job form', (tester) async {
+    await tester.pumpWidget(
+      IsdpApp(home: IsdpShell(isdpRepository: _TestIsdpRepository())),
+    );
+
+    await tester.tap(find.byKey(const Key('technician-create-job-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('New Job'), findsOneWidget);
+    expect(find.text('Site name'), findsOneWidget);
+    expect(find.text('Work scope'), findsOneWidget);
+  });
+
+  testWidgets('technician can create a job with an empty queue', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      IsdpApp(
+        home: IsdpShell(
+          initialRole: AppRole.technician,
+          isdpRepository: _EmptyIsdpRepository(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('empty-create-job-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('New Job'), findsOneWidget);
+  });
+
+  testWidgets('technician sees a created job awaiting supervisor', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      IsdpApp(
+        home: IsdpShell(
+          initialRole: AppRole.technician,
+          userProfile: const AppUserProfile(
+            uid: 'creator-1',
+            email: 'creator@example.com',
+            name: 'Creator',
+            role: AppRole.technician,
+          ),
+          isdpRepository: _CreatedJobRepository(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Sent to supervisor for review and assignment.'),
+      findsOneWidget,
+    );
+    expect(find.text('Confirm arrival'), findsNothing);
+
+    await tester.tap(find.text('Jobs'));
+    await tester.pumpAndSettle();
+    expect(find.text('Creator Site'), findsOneWidget);
+  });
+
+  testWidgets('new technician job remains visible after creation', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      IsdpApp(
+        home: IsdpShell(
+          initialRole: AppRole.technician,
+          userProfile: const AppUserProfile(
+            uid: 'creator-1',
+            email: 'creator@example.com',
+            name: 'Creator',
+            role: AppRole.technician,
+          ),
+          isdpRepository: _EmptyIsdpRepository(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('empty-create-job-button')));
+    await tester.pumpAndSettle();
+
+    final fields = find.byType(TextField);
+    await tester.enterText(fields.at(0), 'New Creator Site');
+    await tester.enterText(fields.at(1), 'Main Road');
+    await tester.enterText(fields.at(2), 'Inspect equipment');
+    await tester.tap(find.widgetWithText(FilledButton, 'Create Job'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('New Creator Site'), findsWidgets);
+    expect(
+      find.text('Sent to supervisor for review and assignment.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('technician countdown runs before arrival scan', (tester) async {
+    await tester.pumpWidget(
+      IsdpApp(home: IsdpShell(isdpRepository: _UnscannedJobRepository())),
+    );
+
+    expect(find.textContaining('Due in'), findsWidgets);
+    expect(find.textContaining('1 day'), findsOneWidget);
+    expect(find.textContaining('5 hours'), findsOneWidget);
+  });
+
+  testWidgets('admin sees approval queue', (tester) async {
+    await tester.pumpWidget(
+      IsdpApp(
+        home: IsdpShell(
+          initialRole: AppRole.admin,
+          isdpRepository: _TestIsdpRepository(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Admin Control'), findsOneWidget);
+    expect(find.text('Admin Tools'), findsOneWidget);
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -500));
+    await tester.pumpAndSettle();
+    expect(find.text('Needs Approval'), findsOneWidget);
+  });
+
+  testWidgets('admin zero-job today view keeps action buttons', (tester) async {
+    await tester.pumpWidget(
+      IsdpApp(
+        home: IsdpShell(
+          initialRole: AppRole.admin,
+          isdpRepository: _EmptyIsdpRepository(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Create Job'), findsOneWidget);
+    expect(find.text('Review'), findsOneWidget);
+    expect(find.text('Analytics'), findsOneWidget);
+    expect(find.text('No jobs yet'), findsOneWidget);
+  });
+
+  testWidgets('admin can delete a job from job details', (tester) async {
+    final repository = _DeletableIsdpRepository();
+
+    await tester.pumpWidget(
+      IsdpApp(
+        home: IsdpShell(initialRole: AppRole.admin, isdpRepository: repository),
+      ),
+    );
+
+    await tester.tap(find.text('Jobs'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('Delete Site'));
+    await tester.pumpAndSettle();
+    expect(find.text('Delete Job'), findsNothing);
+    await tester.tap(find.byTooltip('Options'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete job'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+    await tester.pumpAndSettle();
+
+    expect(repository.deletedIds, ['JOB-CMT-ESW-5001']);
+    expect(find.textContaining('Delete Site'), findsNothing);
+  });
+
+  testWidgets('assignment searches by email but assigns technician names', (
+    tester,
+  ) async {
+    List<String>? assigned;
+
+    await tester.pumpWidget(
+      IsdpApp(
+        home: Scaffold(
+          body: AssignTechnicianScreen(
+            order: _assignableOrder(),
+            technicians: const [
+              AppUserProfile(
+                uid: 'tech-1',
+                email: 'sibusiso@example.com',
+                name: 'Sibusiso M.',
+                role: AppRole.technician,
+              ),
+              AppUserProfile(
+                uid: 'tech-2',
+                email: 'thabo@example.com',
+                name: 'Thabo M.',
+                role: AppRole.technician,
+              ),
+            ],
+            onAssigned: (names) => assigned = names,
+          ),
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField), 'thabo@example.com');
+    await tester.pump();
+
+    expect(find.text('Thabo M.'), findsOneWidget);
+
+    await tester.tap(find.text('Thabo M.'));
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Assign Job'));
+
+    expect(assigned, ['Thabo M.']);
+  });
+
+  testWidgets('assignment cannot add a technician outside the directory', (
+    tester,
+  ) async {
+    List<String>? assigned;
+
+    await tester.pumpWidget(
+      IsdpApp(
+        home: Scaffold(
+          body: AssignTechnicianScreen(
+            order: _assignableOrder(),
+            technicians: const [
+              AppUserProfile(
+                uid: 'tech-1',
+                email: 'sibusiso@example.com',
+                name: 'Sibusiso M.',
+                role: AppRole.technician,
+              ),
+            ],
+            onAssigned: (names) => assigned = names,
+          ),
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField), 'unknown@example.com');
+    await tester.pump();
+
+    expect(find.textContaining('Add Unknown'), findsNothing);
+    expect(find.text('No technicians match this search.'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Assign 0'));
+    await tester.pump();
+
+    expect(assigned, isNull);
+    expect(find.text('Select an existing technician.'), findsOneWidget);
+  });
+
+  testWidgets('analytics person row opens job drilldown', (tester) async {
+    await tester.pumpWidget(
+      IsdpApp(
+        home: Scaffold(
+          body: AnalyticsView(
+            role: AppRole.admin,
+            workOrders: [
+              _assignableOrder().copyWith(
+                site: 'Analytics Job',
+                assignedTechnicians: ['Thabo M.'],
+                assignedTo: 'Thabo M.',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('People'), findsOneWidget);
+    await tester.tap(find.text('Thabo M.'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Jobs Needing Attention'), findsOneWidget);
+    expect(find.text('Analytics Job'), findsOneWidget);
+  });
+
+  testWidgets('notifications dedupe repeated stream updates', (tester) async {
+    final initial = _assignableOrder();
+    final repository = _NotificationStreamRepository([initial]);
+
+    await tester.pumpWidget(
+      IsdpApp(
+        home: IsdpShell(initialRole: AppRole.admin, isdpRepository: repository),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final submitted = initial.copyWith(status: 'Submitted');
+    repository.emit([submitted]);
+    await tester.pump();
+    await tester.pump();
+    repository.emit([submitted]);
+    await tester.pump();
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('Notifications'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Job submitted'), findsOneWidget);
+  });
+
+  testWidgets('approved chat is listed only while it has unread messages', (
+    tester,
+  ) async {
+    final order = _assignableOrder().copyWith(status: 'Approved');
+
+    await tester.pumpWidget(
+      IsdpApp(
+        home: JobChatsScreen(
+          orders: [order],
+          repository: _UnreadChatRepository(1),
+          onOpenChat: (_) {},
+          onClose: () {},
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Assignment Site'), findsOneWidget);
+
+    await tester.pumpWidget(
+      IsdpApp(
+        home: JobChatsScreen(
+          orders: [order],
+          repository: _UnreadChatRepository(0),
+          onOpenChat: (_) {},
+          onClose: () {},
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Assignment Site'), findsNothing);
+  });
+
+  testWidgets('create job ignores duplicate taps while save is pending', (
+    tester,
+  ) async {
+    final repository = _SlowCreateIsdpRepository();
+
+    await tester.pumpWidget(
+      IsdpApp(
+        home: IsdpShell(initialRole: AppRole.admin, isdpRepository: repository),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('empty-create-job-button')));
+    await tester.pumpAndSettle();
+
+    final fields = find.byType(TextField);
+    await tester.enterText(fields.at(0), 'Duplicate Test Site');
+    await tester.enterText(fields.at(1), 'Duplicate Test Address');
+    await tester.enterText(fields.at(2), 'Install duplicate prevention.');
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Create Job'));
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Creating...'));
+    await tester.pump();
+
+    expect(repository.createCalls, 1);
+
+    repository.completeSave();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('upload evidence screen can show before photo only', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      IsdpApp(
+        home: UploadEvidenceScreen(
+          order: _evidenceOrder(),
+          targetSlot: 'before',
+        ),
+      ),
+    );
+
+    expect(find.text('Before photo'), findsOneWidget);
+    expect(find.text('After photo'), findsNothing);
+  });
+
+  testWidgets('upload evidence screen can show after photo only', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      IsdpApp(
+        home: UploadEvidenceScreen(
+          order: _evidenceOrder(),
+          targetSlot: 'after',
+        ),
+      ),
+    );
+
+    expect(find.text('After photo'), findsOneWidget);
+    expect(find.text('Before photo'), findsNothing);
+  });
+
+  testWidgets('submit enables after customer sign-off is saved', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      IsdpApp(home: IsdpShell(isdpRepository: _CompletableIsdpRepository())),
+    );
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Complete'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Work completed'),
+      'Installed and tested successfully.',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Customer name'),
+      'Customer One',
+    );
+    await tester.tap(find.text('Capture signature'));
+    await tester.pumpAndSettle();
+
+    final signatureStart = tester.getCenter(find.text('SIGN HERE'));
+    final gesture = await tester.startGesture(signatureStart);
+    await gesture.moveBy(const Offset(120, 40));
+    await gesture.up();
+    await tester.pump();
+    await tester.tap(find.text('Use this signature'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Save completion details'));
+    await tester.pumpAndSettle();
+
+    final submitButton = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Submit'),
+    );
+    expect(submitButton.onPressed, isNotNull);
+  });
+
+  testWidgets('supervisor sees team board', (tester) async {
+    await tester.pumpWidget(
+      IsdpApp(
+        home: IsdpShell(
+          initialRole: AppRole.supervisor,
+          isdpRepository: _TestIsdpRepository(),
+        ),
+      ),
+    );
+
+    expect(find.text('Supervisor Desk'), findsOneWidget);
+    expect(find.text('Team Queue'), findsOneWidget);
+    expect(find.text('Accept Job'), findsOneWidget);
+  });
+}
+
+mixin _RepositoryTestStubs {
+  Future<void> declineWorkOrder(
+    WorkOrder order,
+    String reason, {
+    required bool allowResubmission,
+  }) async {}
+
+  Future<void> closeWorkOrder(WorkOrder order) async {}
+
+  Stream<List<SupportMessage>> watchSupportMessages({int limit = 50}) =>
+      Stream.value(const []);
+
+  Future<List<SupportMessage>> fetchSupportMessages({
+    int limit = 50,
+    SupportMessage? startAfterMessage,
+  }) async => const [];
+
+  Stream<int> watchSupportMessageCount() => Stream.value(0);
+
+  Future<void> sendSupportMessage({
+    required String message,
+    required String senderName,
+    required String senderRole,
+    required String senderEmail,
+  }) async {}
+
+  Future<void> markSupportMessagesRead() async {}
+
+  Future<void> clearLocalCache() async {}
+}
+
+class _CreatedJobRepository extends _TestIsdpRepository {
+  final _createdJob = const WorkOrder(
+    id: 'JOB-CREATED-1',
+    site: 'Creator Site',
+    address: 'Main Road',
+    scope: 'Inspect equipment',
+    sla: 'Due tomorrow',
+    siteCode: 'SITE-CREATED-1',
+    status: 'Assigned to Supervisor',
+    priority: Priority.high,
+    createdBy: 'creator-1',
+  );
+
+  @override
+  List<WorkOrder> getWorkOrders() => [_createdJob];
+
+  @override
+  Stream<List<WorkOrder>> watchWorkOrders() => Stream.value([_createdJob]);
+}
+
+class _TestIsdpRepository with _RepositoryTestStubs implements IsdpRepository {
+  _TestIsdpRepository();
+
+  final List<WorkOrder> _jobs = [
+    WorkOrder(
+      id: 'JOB-CMT-ESW-1048',
+      site: 'Matsapha Office Block',
+      address: 'King Mswati III Avenue, Matsapha',
+      scope: 'Fix unstable Wi-Fi coverage in the reception area',
+      sla: 'Due in 11 hours',
+      siteCode: 'SITE-MAT-03',
+      status: 'On Site',
+      priority: Priority.critical,
+      dueAt: _futureDueAt,
+      arrivedAt: _arrivedAt,
+      arrivalVerified: true,
+      supervisor: 'Mandla Dlamini',
+      assignedTo: 'Sibusiso M.',
+    ),
+    WorkOrder(
+      id: 'JOB-CMT-ESW-1050',
+      site: 'Manzini Warehouse',
+      address: 'Ngwane Street, Manzini',
+      scope: 'Repair access control keypad and submit service report',
+      sla: 'Ready for approval',
+      siteCode: 'SITE-MNZ-CR',
+      status: 'Submitted',
+      priority: Priority.low,
+      dueAt: _futureDueAt,
+      arrivedAt: _arrivedAt,
+      supervisor: 'Mandla Dlamini',
+      assignedTo: 'Thabo M.',
+      evidenceUploaded: true,
+      evidenceSlots: ['before', 'after'],
+    ),
+    WorkOrder(
+      id: 'JOB-CMT-ESW-1052',
+      site: 'Nhlangano Depot',
+      address: 'Main Road, Nhlangano',
+      scope: 'Install backup router and test failover',
+      sla: 'Due in 18 hours',
+      siteCode: 'SITE-NHL-08',
+      status: 'Assigned to Supervisor',
+      priority: Priority.high,
+      dueAt: _futureDueAt,
+      supervisor: 'Mandla Dlamini',
+    ),
+  ];
+
+  @override
+  List<WorkOrder> getWorkOrders() => _jobs;
+
+  @override
+  Stream<List<WorkOrder>> watchWorkOrders() => Stream.value(_jobs);
+
+  @override
+  Stream<SyncStatus> watchSyncStatus() => Stream.value(SyncStatus.online);
+
+  @override
+  List<Metric> getDashboardMetrics() => const [];
+
+  @override
+  List<JobStep> getJobSteps() => const [];
+
+  @override
+  List<MaterialLine> getMaterials() => const [];
+
+  @override
+  Future<WorkOrder> createWorkOrder(WorkOrder order) async {
+    _jobs.insert(0, order);
+    return order;
+  }
+
+  @override
+  Future<void> acceptWorkOrder(WorkOrder order) async {}
+
+  @override
+  Future<void> assignWorkOrder(WorkOrder order) async {}
+
+  @override
+  Future<void> markOnsite(WorkOrder order) async {}
+
+  @override
+  Future<void> saveEvidence(
+    WorkOrder order,
+    List<String> evidenceSlots, {
+    Map<String, String> evidencePhotos = const {},
+  }) async {}
+
+  @override
+  Future<void> saveCompletionDetails(WorkOrder order) async {}
+
+  @override
+  Future<void> submitCompletion(WorkOrder order) async {}
+
+  @override
+  Future<void> reviewWorkOrder(WorkOrder order) async {}
+
+  @override
+  Future<void> approveWorkOrder(WorkOrder order) async {}
+
+  @override
+  Future<void> deleteWorkOrder(WorkOrder order) async {}
+
+  @override
+  Stream<List<JobChatMessage>> watchJobMessages(String workOrderId) =>
+      Stream.value(const []);
+
+  @override
+  Future<void> sendJobMessage({
+    required String workOrderId,
+    required String message,
+    required String senderName,
+    required String senderRole,
+  }) async {}
+
+  @override
+  Stream<int> watchUnreadJobMessageCount(String workOrderId) => Stream.value(0);
+
+  @override
+  Stream<int> watchUnreadJobMessageTotal(List<String> workOrderIds) =>
+      Stream.value(0);
+
+  @override
+  Future<void> markJobChatRead(String workOrderId) async {}
+}
+
+final _futureDueAt = DateTime.now().add(const Duration(hours: 11));
+final _arrivedAt = DateTime.now().subtract(const Duration(minutes: 10));
+
+WorkOrder _evidenceOrder() {
+  return WorkOrder(
+    id: 'JOB-CMT-ESW-2001',
+    site: 'Evidence Site',
+    address: 'Test Address',
+    scope: 'Capture evidence',
+    sla: 'Due today',
+    siteCode: 'SITE-EVD-01',
+    status: 'On Site',
+    priority: Priority.high,
+    dueAt: _futureDueAt,
+    arrivalVerified: true,
+    assignedTo: 'Sibusiso M.',
+  );
+}
+
+WorkOrder _assignableOrder() {
+  return WorkOrder(
+    id: 'JOB-CMT-ESW-2002',
+    site: 'Assignment Site',
+    address: 'Assignment Address',
+    scope: 'Assign technicians',
+    sla: 'Due today',
+    siteCode: 'SITE-ASN-01',
+    status: 'Accepted by Supervisor',
+    priority: Priority.high,
+    dueAt: _futureDueAt,
+    supervisor: 'Mandla Dlamini',
+  );
+}
+
+class _EmptyIsdpRepository with _RepositoryTestStubs implements IsdpRepository {
+  @override
+  List<WorkOrder> getWorkOrders() => const [];
+
+  @override
+  Stream<List<WorkOrder>> watchWorkOrders() => Stream.value(const []);
+
+  @override
+  Stream<SyncStatus> watchSyncStatus() => Stream.value(SyncStatus.online);
+
+  @override
+  List<Metric> getDashboardMetrics() => const [];
+
+  @override
+  List<JobStep> getJobSteps() => const [];
+
+  @override
+  List<MaterialLine> getMaterials() => const [];
+
+  @override
+  Future<WorkOrder> createWorkOrder(WorkOrder order) async => order;
+
+  @override
+  Future<void> acceptWorkOrder(WorkOrder order) async {}
+
+  @override
+  Future<void> assignWorkOrder(WorkOrder order) async {}
+
+  @override
+  Future<void> markOnsite(WorkOrder order) async {}
+
+  @override
+  Future<void> saveEvidence(
+    WorkOrder order,
+    List<String> evidenceSlots, {
+    Map<String, String> evidencePhotos = const {},
+  }) async {}
+
+  @override
+  Future<void> saveCompletionDetails(WorkOrder order) async {}
+
+  @override
+  Future<void> submitCompletion(WorkOrder order) async {}
+
+  @override
+  Stream<List<JobChatMessage>> watchJobMessages(String workOrderId) =>
+      Stream.value(const []);
+
+  @override
+  Future<void> sendJobMessage({
+    required String workOrderId,
+    required String message,
+    required String senderName,
+    required String senderRole,
+  }) async {}
+
+  @override
+  Stream<int> watchUnreadJobMessageCount(String workOrderId) => Stream.value(0);
+
+  @override
+  Stream<int> watchUnreadJobMessageTotal(List<String> workOrderIds) =>
+      Stream.value(0);
+
+  @override
+  Future<void> markJobChatRead(String workOrderId) async {}
+
+  @override
+  Future<void> reviewWorkOrder(WorkOrder order) async {}
+
+  @override
+  Future<void> approveWorkOrder(WorkOrder order) async {}
+
+  @override
+  Future<void> deleteWorkOrder(WorkOrder order) async {}
+}
+
+class _UnscannedJobRepository extends _EmptyIsdpRepository {
+  final WorkOrder _job = WorkOrder(
+    id: 'JOB-CMT-ESW-4001',
+    site: 'Unscanned Site',
+    address: 'Unscanned Address',
+    scope: 'Arrive and complete work',
+    sla: 'Due tomorrow',
+    siteCode: 'SITE-UNS-01',
+    status: 'Dispatched',
+    priority: Priority.high,
+    dueAt: DateTime.now().add(const Duration(days: 1, hours: 5, minutes: 30)),
+    assignedTo: 'Sibusiso M.',
+  );
+
+  @override
+  List<WorkOrder> getWorkOrders() => [_job];
+
+  @override
+  Stream<List<WorkOrder>> watchWorkOrders() => Stream.value([_job]);
+}
+
+class _NotificationStreamRepository extends _EmptyIsdpRepository {
+  _NotificationStreamRepository(this._orders);
+
+  List<WorkOrder> _orders;
+  final StreamController<List<WorkOrder>> _controller =
+      StreamController<List<WorkOrder>>.broadcast();
+
+  void emit(List<WorkOrder> orders) {
+    _orders = orders;
+    _controller.add(orders);
+  }
+
+  @override
+  List<WorkOrder> getWorkOrders() => _orders;
+
+  @override
+  Stream<List<WorkOrder>> watchWorkOrders() async* {
+    yield _orders;
+    yield* _controller.stream;
+  }
+}
+
+class _UnreadChatRepository extends _EmptyIsdpRepository {
+  _UnreadChatRepository(this.count);
+
+  final int count;
+
+  @override
+  Stream<int> watchUnreadJobMessageCount(String workOrderId) =>
+      Stream.value(count);
+
+  @override
+  Stream<int> watchUnreadJobMessageTotal(List<String> workOrderIds) =>
+      Stream.value(count);
+}
+
+class _DeletableIsdpRepository extends _EmptyIsdpRepository {
+  final deletedIds = <String>[];
+  final List<WorkOrder> _orders = [
+    WorkOrder(
+      id: 'JOB-CMT-ESW-5001',
+      site: 'Delete Site',
+      address: 'Delete Address',
+      scope: 'Remove this job',
+      sla: 'Due today',
+      siteCode: 'SITE-DEL-01',
+      status: 'Assigned to Supervisor',
+      priority: Priority.high,
+      dueAt: _futureDueAt,
+    ),
+  ];
+
+  @override
+  List<WorkOrder> getWorkOrders() => _orders;
+
+  @override
+  Stream<List<WorkOrder>> watchWorkOrders() => Stream.value(_orders);
+
+  @override
+  Future<void> deleteWorkOrder(WorkOrder order) async {
+    deletedIds.add(order.id);
+    _orders.removeWhere((candidate) => candidate.id == order.id);
+  }
+}
+
+class _SlowCreateIsdpRepository extends _EmptyIsdpRepository {
+  final Completer<void> _saveCompleter = Completer<void>();
+  int createCalls = 0;
+
+  @override
+  Future<WorkOrder> createWorkOrder(WorkOrder order) async {
+    createCalls += 1;
+    await _saveCompleter.future;
+    return order;
+  }
+
+  void completeSave() {
+    if (!_saveCompleter.isCompleted) _saveCompleter.complete();
+  }
+}
+
+class _CompletableIsdpRepository
+    with _RepositoryTestStubs
+    implements IsdpRepository {
+  final WorkOrder _job = WorkOrder(
+    id: 'JOB-CMT-ESW-3001',
+    site: 'Ready Site',
+    address: 'Ready Address',
+    scope: 'Complete the job',
+    sla: 'Due today',
+    siteCode: 'SITE-RDY-01',
+    status: 'On Site',
+    priority: Priority.high,
+    dueAt: _futureDueAt,
+    arrivedAt: _arrivedAt,
+    arrivalVerified: true,
+    evidenceUploaded: true,
+    evidenceSlots: const ['before', 'after'],
+    assignedTo: 'Sibusiso M.',
+  );
+
+  @override
+  List<WorkOrder> getWorkOrders() => [_job];
+
+  @override
+  Stream<List<WorkOrder>> watchWorkOrders() => Stream.value([_job]);
+
+  @override
+  Stream<SyncStatus> watchSyncStatus() => Stream.value(SyncStatus.online);
+
+  @override
+  List<Metric> getDashboardMetrics() => const [];
+
+  @override
+  List<JobStep> getJobSteps() => const [];
+
+  @override
+  List<MaterialLine> getMaterials() => const [];
+
+  @override
+  Future<WorkOrder> createWorkOrder(WorkOrder order) async => order;
+
+  @override
+  Future<void> acceptWorkOrder(WorkOrder order) async {}
+
+  @override
+  Future<void> assignWorkOrder(WorkOrder order) async {}
+
+  @override
+  Future<void> markOnsite(WorkOrder order) async {}
+
+  @override
+  Future<void> saveEvidence(
+    WorkOrder order,
+    List<String> evidenceSlots, {
+    Map<String, String> evidencePhotos = const {},
+  }) async {}
+
+  @override
+  Future<void> saveCompletionDetails(WorkOrder order) async {}
+
+  @override
+  Future<void> submitCompletion(WorkOrder order) async {}
+
+  @override
+  Future<void> reviewWorkOrder(WorkOrder order) async {}
+
+  @override
+  Future<void> approveWorkOrder(WorkOrder order) async {}
+
+  @override
+  Future<void> deleteWorkOrder(WorkOrder order) async {}
+
+  @override
+  Stream<List<JobChatMessage>> watchJobMessages(String workOrderId) =>
+      Stream.value(const []);
+
+  @override
+  Future<void> sendJobMessage({
+    required String workOrderId,
+    required String message,
+    required String senderName,
+    required String senderRole,
+  }) async {}
+
+  @override
+  Stream<int> watchUnreadJobMessageCount(String workOrderId) => Stream.value(0);
+
+  @override
+  Stream<int> watchUnreadJobMessageTotal(List<String> workOrderIds) =>
+      Stream.value(0);
+
+  @override
+  Future<void> markJobChatRead(String workOrderId) async {}
+}

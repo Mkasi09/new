@@ -1,0 +1,98 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isSupervisor() {
+      return signedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'supervisor';
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn() &&
+        (request.auth.uid == userId || isAdmin() || isSupervisor());
+      allow create: if false;
+      allow delete: if false;
+      allow update: if (
+        request.auth.uid == userId &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly([
+            'mustChangePassword',
+            'passwordChangedAt',
+            'fcmTokens',
+            'hmsTokens',
+            'notificationTokens',
+            'lastNotificationToken',
+            'lastHuaweiNotificationToken',
+            'notificationsUpdatedAt'
+          ]) &&
+        (
+          !request.resource.data.diff(resource.data).affectedKeys()
+            .hasAny(['mustChangePassword']) ||
+          request.resource.data.mustChangePassword == false
+        )
+      ) || (
+        isAdmin() &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['team'])
+      );
+
+      match /chat_unread/{orderId} {
+        allow read: if signedIn() && request.auth.uid == userId;
+        allow create, update: if signedIn() &&
+          request.auth.uid == userId &&
+          request.resource.data.count == 0;
+        allow delete: if false;
+      }
+    }
+
+    match /work_orders/{orderId} {
+      allow read, create, update: if signedIn();
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow read: if signedIn();
+        allow create: if signedIn() &&
+          request.resource.data.senderId == request.auth.uid &&
+          request.resource.data.message is string &&
+          request.resource.data.message.size() > 0 &&
+          request.resource.data.message.size() <= 2000;
+        allow update, delete: if false;
+      }
+
+      match /chat_reads/{userId} {
+        allow read, create, update: if signedIn() && request.auth.uid == userId;
+        allow delete: if false;
+      }
+    }
+
+    match /invoices/{invoiceId} {
+      allow read, create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    match /support_messages/{messageId} {
+      allow read: if signedIn() &&
+        (isAdmin() || resource.data.senderId == request.auth.uid);
+      allow create: if signedIn() &&
+        request.resource.data.senderId == request.auth.uid &&
+        request.resource.data.source == 'support' &&
+        request.resource.data.status == 'new' &&
+        request.resource.data.message is string &&
+        request.resource.data.message.size() > 0 &&
+        request.resource.data.message.size() <= 2000;
+      allow update: if isAdmin() &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'readAt']);
+      allow delete: if false;
+    }
+  }
+}

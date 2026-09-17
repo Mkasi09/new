@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "486212138983",
+    "project_id": "inkomati-usuthu-isdp",
+    "storage_bucket": "inkomati-usuthu-isdp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:486212138983:android:b0060d4286db27bfebaf42",
+        "android_client_info": {
+          "package_name": "za.co.inkomatiusuthu.isdp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB9CZ0JRM6ksBS-mHqx_7sgNTbeODWW8pk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
