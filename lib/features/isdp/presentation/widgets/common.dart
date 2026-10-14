@@ -395,10 +395,10 @@ class WorkDurationPanel extends StatelessWidget {
     final color = submittedAt == null ? AppTheme.primary : AppTheme.success;
     final title = _workDurationText(order) ?? 'Not started';
     final detail = arrivedAt == null
-        ? 'Technician has not scanned the site QR yet.'
+        ? 'Technician has not accepted the job and recorded GPS yet.'
         : submittedAt == null
-        ? 'Counting from QR scan until technician submits the job.'
-        : 'Measured from QR scan to job submission.';
+        ? 'Counting from job acceptance until technician submits the job.'
+        : 'Measured from job acceptance to job submission.';
 
     return Card(
       child: Padding(

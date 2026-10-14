@@ -33,10 +33,16 @@ class WorkOrder {
     required this.priority,
     this.dueAt,
     this.arrivedAt,
+    this.arrivalLatitude,
+    this.arrivalLongitude,
     this.submittedAt,
+    this.submissionLatitude,
+    this.submissionLongitude,
     this.approvedAt,
     this.declinedAt,
     this.closedAt,
+    this.closureLatitude,
+    this.closureLongitude,
     this.declineReason,
     this.arrivalVerified = false,
     this.evidenceUploaded = false,
@@ -71,10 +77,16 @@ class WorkOrder {
   final Priority priority;
   final DateTime? dueAt;
   final DateTime? arrivedAt;
+  final double? arrivalLatitude;
+  final double? arrivalLongitude;
   final DateTime? submittedAt;
+  final double? submissionLatitude;
+  final double? submissionLongitude;
   final DateTime? approvedAt;
   final DateTime? declinedAt;
   final DateTime? closedAt;
+  final double? closureLatitude;
+  final double? closureLongitude;
   final String? declineReason;
   final bool arrivalVerified;
   final bool evidenceUploaded;
@@ -109,10 +121,16 @@ class WorkOrder {
     Priority? priority,
     DateTime? dueAt,
     DateTime? arrivedAt,
+    double? arrivalLatitude,
+    double? arrivalLongitude,
     DateTime? submittedAt,
+    double? submissionLatitude,
+    double? submissionLongitude,
     DateTime? approvedAt,
     DateTime? declinedAt,
     DateTime? closedAt,
+    double? closureLatitude,
+    double? closureLongitude,
     String? declineReason,
     bool? arrivalVerified,
     bool? evidenceUploaded,
@@ -147,10 +165,16 @@ class WorkOrder {
       priority: priority ?? this.priority,
       dueAt: dueAt ?? this.dueAt,
       arrivedAt: arrivedAt ?? this.arrivedAt,
+      arrivalLatitude: arrivalLatitude ?? this.arrivalLatitude,
+      arrivalLongitude: arrivalLongitude ?? this.arrivalLongitude,
       submittedAt: submittedAt ?? this.submittedAt,
+      submissionLatitude: submissionLatitude ?? this.submissionLatitude,
+      submissionLongitude: submissionLongitude ?? this.submissionLongitude,
       approvedAt: approvedAt ?? this.approvedAt,
       declinedAt: declinedAt ?? this.declinedAt,
       closedAt: closedAt ?? this.closedAt,
+      closureLatitude: closureLatitude ?? this.closureLatitude,
+      closureLongitude: closureLongitude ?? this.closureLongitude,
       declineReason: declineReason ?? this.declineReason,
       arrivalVerified: arrivalVerified ?? this.arrivalVerified,
       evidenceUploaded: evidenceUploaded ?? this.evidenceUploaded,
@@ -207,10 +231,16 @@ class WorkOrder {
       'priority': priority.name,
       'dueAt': dueAt?.toIso8601String(),
       'arrivedAt': arrivedAt?.toIso8601String(),
+      'arrivalLatitude': arrivalLatitude,
+      'arrivalLongitude': arrivalLongitude,
       'submittedAt': submittedAt?.toIso8601String(),
+      'submissionLatitude': submissionLatitude,
+      'submissionLongitude': submissionLongitude,
       'approvedAt': approvedAt?.toIso8601String(),
       'declinedAt': declinedAt?.toIso8601String(),
       'closedAt': closedAt?.toIso8601String(),
+      'closureLatitude': closureLatitude,
+      'closureLongitude': closureLongitude,
       'declineReason': declineReason,
       'arrivalVerified': arrivalVerified,
       'evidenceUploaded': evidenceUploaded,
@@ -250,10 +280,16 @@ class WorkOrder {
           _dateTimeFromMapValue(map['dueAt']) ??
           _dueAtFromFriendlyText(map['sla'] as String?),
       arrivedAt: _dateTimeFromMapValue(map['arrivedAt']),
+      arrivalLatitude: (map['arrivalLatitude'] as num?)?.toDouble(),
+      arrivalLongitude: (map['arrivalLongitude'] as num?)?.toDouble(),
       submittedAt: _dateTimeFromMapValue(map['submittedAt']),
+      submissionLatitude: (map['submissionLatitude'] as num?)?.toDouble(),
+      submissionLongitude: (map['submissionLongitude'] as num?)?.toDouble(),
       approvedAt: _dateTimeFromMapValue(map['approvedAt']),
       declinedAt: _dateTimeFromMapValue(map['declinedAt']),
       closedAt: _dateTimeFromMapValue(map['closedAt']),
+      closureLatitude: (map['closureLatitude'] as num?)?.toDouble(),
+      closureLongitude: (map['closureLongitude'] as num?)?.toDouble(),
       declineReason: map['declineReason'] as String?,
       arrivalVerified: map['arrivalVerified'] as bool? ?? false,
       evidenceUploaded: map['evidenceUploaded'] as bool? ?? false,

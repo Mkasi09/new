@@ -59,6 +59,8 @@
 	<string>Main</string>
 	<key>NSCameraUsageDescription</key>
 	<string>PHEPHA MV ISDP uses the camera to scan site QR codes and capture job evidence photos.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>PHEPHA MV ISDP records your location when you accept and close a job card.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>PHEPHA MV ISDP uses your photo library to attach job evidence photos.</string>
 	<key>UISupportedInterfaceOrientations</key>

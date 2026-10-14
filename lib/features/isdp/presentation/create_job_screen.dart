@@ -47,7 +47,7 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
                       icon: Icons.add_task,
                       title: 'New Job',
                       subtitle:
-                          'Capture the job details. QR routing and supervisor assignment run automatically.',
+                          'Capture the job details. Routing and supervisor assignment run automatically.',
                     ),
                     const SizedBox(height: 14),
                     Card(

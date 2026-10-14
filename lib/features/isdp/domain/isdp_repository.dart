@@ -21,7 +21,7 @@ abstract class IsdpRepository {
 
   Future<void> assignWorkOrder(WorkOrder order);
 
-  Future<void> markOnsite(WorkOrder order);
+  Future<void> markOnsite(WorkOrder order, {required double latitude, required double longitude});
 
   Future<void> saveEvidence(
     WorkOrder order,
@@ -43,7 +43,7 @@ abstract class IsdpRepository {
     required bool allowResubmission,
   });
 
-  Future<void> closeWorkOrder(WorkOrder order);
+  Future<void> closeWorkOrder(WorkOrder order, {required double latitude, required double longitude});
 
   Future<void> deleteWorkOrder(WorkOrder order);
 

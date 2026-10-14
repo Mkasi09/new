@@ -13,8 +13,8 @@ class AcceptanceView extends StatelessWidget {
         const SectionTitle('Acceptance & Billing Readiness'),
         const SizedBox(height: 10),
         const _BillingGate(
-          title: 'Site QR verified',
-          detail: 'Technician arrival was confirmed by scanning the site QR.',
+          title: 'Technician accepted job',
+          detail: 'GPS coordinates and acceptance time were recorded.',
           complete: true,
         ),
         const _BillingGate(

@@ -27,7 +27,7 @@ class DashboardView extends StatefulWidget {
     required this.onAcceptOrder,
     required this.onOpenReviewOrder,
     required this.onAssignOrder,
-    required this.onScanArrival,
+    required this.onAcceptTechnicianJob,
     required this.onUploadEvidence,
     required this.onOpenCompletionDetails,
     required this.onSubmitCompletion,
@@ -55,7 +55,7 @@ class DashboardView extends StatefulWidget {
   final Future<void> Function(WorkOrder) onAcceptOrder;
   final ValueChanged<WorkOrder> onOpenReviewOrder;
   final Future<void> Function(WorkOrder) onAssignOrder;
-  final Future<bool?> Function(WorkOrder) onScanArrival;
+  final Future<void> Function(WorkOrder) onAcceptTechnicianJob;
   final Future<List<String>?> Function(WorkOrder, String?) onUploadEvidence;
   final ValueChanged<WorkOrder> onOpenCompletionDetails;
   final Future<void> Function(WorkOrder) onSubmitCompletion;
@@ -137,7 +137,7 @@ class _DashboardViewState extends State<DashboardView> {
         arrivalVerified: arrivalVerified,
         evidenceUploaded: evidenceUploaded,
         evidenceSlots: _evidenceSlots,
-        onScanSiteQr: _scanSiteQr,
+        onAcceptTechnicianJob: widget.onAcceptTechnicianJob,
         onUploadImages: _uploadImages,
         onOpenOrder: widget.onOpenOrder,
         onOpenCompletionDetails: widget.onOpenCompletionDetails,
@@ -155,20 +155,6 @@ class _DashboardViewState extends State<DashboardView> {
     _evidenceUploaded =
         widget.selectedOrder.evidenceUploaded ||
         _hasAllEvidenceSlots(_evidenceSlots);
-  }
-
-  Future<void> _scanSiteQr(BuildContext context) async {
-    final matched = await widget.onScanArrival(widget.selectedOrder);
-
-    if (!context.mounted || matched == null) return;
-
-    setState(() => _arrivalVerified = matched);
-    if (matched) return;
-
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('QR code does not match this job.')),
-    );
   }
 
   Future<void> _uploadImages(BuildContext context, String slot) async {
@@ -514,7 +500,7 @@ class _TechnicianHome extends StatelessWidget {
     required this.arrivalVerified,
     required this.evidenceUploaded,
     required this.evidenceSlots,
-    required this.onScanSiteQr,
+    required this.onAcceptTechnicianJob,
     required this.onUploadImages,
     required this.onOpenOrder,
     required this.onOpenCompletionDetails,
@@ -533,7 +519,7 @@ class _TechnicianHome extends StatelessWidget {
   final bool arrivalVerified;
   final bool evidenceUploaded;
   final List<String> evidenceSlots;
-  final ValueChanged<BuildContext> onScanSiteQr;
+  final Future<void> Function(WorkOrder) onAcceptTechnicianJob;
   final void Function(BuildContext, String) onUploadImages;
   final ValueChanged<WorkOrder> onOpenOrder;
   final ValueChanged<WorkOrder> onOpenCompletionDetails;
@@ -682,7 +668,9 @@ class _TechnicianHome extends StatelessWidget {
           completionReady: completionReady,
           submitted: submitted,
           resubmission: order.status == 'Declined',
-          onScanSiteQr: arrivalVerified ? null : () => onScanSiteQr(context),
+          onAcceptTechnicianJob: arrivalVerified
+              ? null
+              : () => onAcceptTechnicianJob(order),
           onUploadBefore: beforeUploaded
               ? null
               : () => onUploadImages(context, 'before'),
@@ -970,7 +958,7 @@ class _TodayActionPanel extends StatelessWidget {
     required this.completionReady,
     required this.submitted,
     required this.resubmission,
-    required this.onScanSiteQr,
+    required this.onAcceptTechnicianJob,
     required this.onUploadBefore,
     required this.onUploadAfter,
     required this.onCompletionDetails,
@@ -986,7 +974,7 @@ class _TodayActionPanel extends StatelessWidget {
   final bool completionReady;
   final bool submitted;
   final bool resubmission;
-  final VoidCallback? onScanSiteQr;
+  final VoidCallback? onAcceptTechnicianJob;
   final VoidCallback? onUploadBefore;
   final VoidCallback? onUploadAfter;
   final VoidCallback? onCompletionDetails;
@@ -1008,12 +996,12 @@ class _TodayActionPanel extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             _CompactWorkActionRow(
-              icon: Icons.qr_code_scanner,
-              title: 'Confirm arrival',
+              icon: Icons.location_on_outlined,
+              title: 'Accept job and record arrival',
               complete: arrivalVerified,
               enabled: true,
-              buttonLabel: 'Scan QR',
-              onTap: onScanSiteQr,
+              buttonLabel: 'Accept Job',
+              onTap: onAcceptTechnicianJob,
             ),
             const Divider(height: 18),
             _CompactWorkActionRow(

@@ -331,7 +331,7 @@ class _SupervisorProgress extends StatelessWidget {
       return 'Arrival confirmed. Waiting for evidence upload.';
     }
     if (order.technicianLabel != null) {
-      return 'Technician assigned. Waiting for arrival scan.';
+      return 'Technician assigned. Waiting for job acceptance and GPS check-in.';
     }
     return 'Accept the job, then assign a technician.';
   }

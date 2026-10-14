@@ -2,8 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/domain/app_role.dart';
@@ -26,7 +25,6 @@ import 'empty_jobs_view.dart';
 import 'job_chat_screen.dart';
 import 'job_chats_screen.dart';
 import 'mobile_billing_preview.dart';
-import 'qr_arrival_scan_screen.dart';
 import 'review_job_screen.dart';
 import 'review_queue_screen.dart';
 import 'supervisor_job_screen.dart';
@@ -38,7 +36,6 @@ import 'work_orders_view.dart';
 enum _WorkflowView {
   createJob,
   assignTechnician,
-  scanQr,
   uploadEvidence,
   completionDetails,
   analytics,
@@ -80,7 +77,6 @@ class _IsdpShellState extends State<IsdpShell> {
   String? _selectedOrderId;
   _WorkflowView? _workflowView;
   WorkOrder? _assigningOrder;
-  WorkOrder? _scanningOrder;
   WorkOrder? _uploadingOrder;
   String? _uploadingEvidenceSlot;
   WorkOrder? _completionOrder;
@@ -88,7 +84,6 @@ class _IsdpShellState extends State<IsdpShell> {
   WorkOrder? _supervisorOrder;
   WorkOrder? _adminOrder;
   bool _returnToReviewQueue = false;
-  Completer<bool?>? _scanCompleter;
   Completer<List<String>?>? _uploadCompleter;
   final List<_AppNotification> _notifications = [];
   final Map<String, WorkOrder> _knownOrders = {};
@@ -215,7 +210,7 @@ class _IsdpShellState extends State<IsdpShell> {
                   onAcceptOrder: _acceptOrder,
                   onOpenReviewOrder: _openReviewScreen,
                   onAssignOrder: _assignOrder,
-                  onScanArrival: _scanArrival,
+                  onAcceptTechnicianJob: _acceptTechnicianJob,
                   onUploadEvidence: _uploadEvidence,
                   onOpenCompletionDetails: _openCompletionDetails,
                   onSubmitCompletion: _submitCompletion,
@@ -324,18 +319,12 @@ class _IsdpShellState extends State<IsdpShell> {
   void _clearWorkflowState() {
     _workflowView = null;
     _assigningOrder = null;
-    _scanningOrder = null;
     _uploadingOrder = null;
     _uploadingEvidenceSlot = null;
     _completionOrder = null;
     _reviewingOrder = null;
     _supervisorOrder = null;
     _returnToReviewQueue = false;
-    final completer = _scanCompleter;
-    if (completer != null && !completer.isCompleted) {
-      completer.complete(null);
-    }
-    _scanCompleter = null;
     final uploadCompleter = _uploadCompleter;
     if (uploadCompleter != null && !uploadCompleter.isCompleted) {
       uploadCompleter.complete(null);
@@ -350,7 +339,6 @@ class _IsdpShellState extends State<IsdpShell> {
         workflowView: _workflowView,
         selectedOrderId: _selectedOrderId,
         assigningOrder: _assigningOrder,
-        scanningOrder: _scanningOrder,
         uploadingOrder: _uploadingOrder,
         uploadingEvidenceSlot: _uploadingEvidenceSlot,
         completionOrder: _completionOrder,
@@ -367,15 +355,10 @@ class _IsdpShellState extends State<IsdpShell> {
       _closeWorkflow();
       return;
     }
-    final scanCompleter = _scanCompleter;
-    if (scanCompleter != null && !scanCompleter.isCompleted) {
-      scanCompleter.complete(null);
-    }
     final uploadCompleter = _uploadCompleter;
     if (uploadCompleter != null && !uploadCompleter.isCompleted) {
       uploadCompleter.complete(null);
     }
-    _scanCompleter = null;
     _uploadCompleter = null;
     final previous = _navigationHistory.removeLast();
     setState(() {
@@ -383,7 +366,6 @@ class _IsdpShellState extends State<IsdpShell> {
       _workflowView = previous.workflowView;
       _selectedOrderId = previous.selectedOrderId;
       _assigningOrder = previous.assigningOrder;
-      _scanningOrder = previous.scanningOrder;
       _uploadingOrder = previous.uploadingOrder;
       _uploadingEvidenceSlot = previous.uploadingEvidenceSlot;
       _completionOrder = previous.completionOrder;
@@ -538,6 +520,8 @@ class _IsdpShellState extends State<IsdpShell> {
       status: hasLocalSubmit ? local.status : remote.status,
       sla: hasLocalSubmit ? local.sla : remote.sla,
       submittedAt: remote.submittedAt ?? local.submittedAt,
+      submissionLatitude: remote.submissionLatitude ?? local.submissionLatitude,
+      submissionLongitude: remote.submissionLongitude ?? local.submissionLongitude,
       arrivalVerified: remote.arrivalVerified || local.arrivalVerified,
       evidenceUploaded: remote.evidenceUploaded || local.evidenceUploaded,
       evidenceSlots: evidenceSlots,
@@ -610,11 +594,6 @@ class _IsdpShellState extends State<IsdpShell> {
           onTechniciansAssigned: _completeAssignment,
           onCancel: _navigateBack,
         ),
-      _WorkflowView.scanQr when _scanningOrder != null => QrArrivalScanScreen(
-        order: _scanningOrder!,
-        onMatched: _completeScan,
-        onCancel: _cancelScan,
-      ),
       _WorkflowView.uploadEvidence when _uploadingOrder != null =>
         UploadEvidenceScreen(
           order: _uploadingOrder!,
@@ -670,7 +649,6 @@ class _IsdpShellState extends State<IsdpShell> {
 
     return AdminJobScreen(
       order: order,
-      onSendQr: () => _sendQr(order),
       onReview: () => _openReviewScreen(order),
       onOpenChat: () => _openJobChat(order),
       unreadChatStream: _repository.watchUnreadJobMessageCount(order.id),
@@ -702,7 +680,6 @@ class _IsdpShellState extends State<IsdpShell> {
     setState(() {
       _workflowView = null;
       _assigningOrder = null;
-      _scanningOrder = null;
       _uploadingOrder = null;
       _uploadingEvidenceSlot = null;
       _completionOrder = null;
@@ -860,56 +837,6 @@ class _IsdpShellState extends State<IsdpShell> {
     }
   }
 
-  Future<void> _sendQr(WorkOrder order) async {
-    final pdf = pw.Document();
-    pdf.addPage(
-      pw.Page(
-        margin: const pw.EdgeInsets.all(36),
-        build: (context) => pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.Text(
-              'PHEPHA MV ISDP Job QR',
-              style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold),
-            ),
-            pw.SizedBox(height: 12),
-            pw.Text(order.site, style: const pw.TextStyle(fontSize: 18)),
-            pw.SizedBox(height: 6),
-            pw.Text(order.address),
-            pw.SizedBox(height: 6),
-            pw.Text(order.id),
-            pw.SizedBox(height: 32),
-            pw.Center(
-              child: pw.BarcodeWidget(
-                barcode: pw.Barcode.qrCode(),
-                data: order.siteCode,
-                width: 240,
-                height: 240,
-                drawText: false,
-              ),
-            ),
-            pw.SizedBox(height: 24),
-            pw.Center(
-              child: pw.Text(
-                'Site code: ${order.siteCode}',
-                style: pw.TextStyle(
-                  fontSize: 18,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-            ),
-            pw.SizedBox(height: 16),
-            pw.Text(
-              'Scan this QR or enter the site code manually to confirm technician arrival.',
-            ),
-          ],
-        ),
-      ),
-    );
-
-    Printing.sharePdf(bytes: await pdf.save(), filename: '${order.id}_qr.pdf');
-  }
-
   void _replaceOrder(WorkOrder updated) {
     _knownOrders[updated.id] = updated;
     setState(() {
@@ -925,7 +852,6 @@ class _IsdpShellState extends State<IsdpShell> {
     setState(() {
       _workflowView = _WorkflowView.createJob;
       _assigningOrder = null;
-      _scanningOrder = null;
       _uploadingOrder = null;
       _reviewingOrder = null;
       _supervisorOrder = null;
@@ -939,7 +865,6 @@ class _IsdpShellState extends State<IsdpShell> {
     setState(() {
       _workflowView = _WorkflowView.analytics;
       _assigningOrder = null;
-      _scanningOrder = null;
       _uploadingOrder = null;
       _reviewingOrder = null;
       _supervisorOrder = null;
@@ -971,7 +896,6 @@ class _IsdpShellState extends State<IsdpShell> {
     setState(() {
       _workflowView = _WorkflowView.reviewQueue;
       _assigningOrder = null;
-      _scanningOrder = null;
       _uploadingOrder = null;
       _reviewingOrder = null;
       _supervisorOrder = null;
@@ -985,7 +909,6 @@ class _IsdpShellState extends State<IsdpShell> {
     setState(() {
       _workflowView = _WorkflowView.jobChats;
       _assigningOrder = null;
-      _scanningOrder = null;
       _uploadingOrder = null;
       _reviewingOrder = null;
       _supervisorOrder = null;
@@ -999,7 +922,6 @@ class _IsdpShellState extends State<IsdpShell> {
     setState(() {
       _workflowView = _WorkflowView.supportInbox;
       _assigningOrder = null;
-      _scanningOrder = null;
       _uploadingOrder = null;
       _reviewingOrder = null;
       _supervisorOrder = null;
@@ -1013,7 +935,6 @@ class _IsdpShellState extends State<IsdpShell> {
     setState(() {
       _workflowView = _WorkflowView.supervisorQueue;
       _assigningOrder = null;
-      _scanningOrder = null;
       _uploadingOrder = null;
       _reviewingOrder = null;
       _supervisorOrder = null;
@@ -1029,7 +950,6 @@ class _IsdpShellState extends State<IsdpShell> {
       _supervisorOrder = order;
       _selectedOrderId = order.id;
       _assigningOrder = null;
-      _scanningOrder = null;
       _uploadingOrder = null;
       _reviewingOrder = null;
       _returnToReviewQueue = false;
@@ -1043,7 +963,6 @@ class _IsdpShellState extends State<IsdpShell> {
       _workflowView = _WorkflowView.reviewJob;
       _reviewingOrder = order;
       _assigningOrder = null;
-      _scanningOrder = null;
       _uploadingOrder = null;
       _supervisorOrder = null;
       _returnToReviewQueue = false;
@@ -1058,7 +977,6 @@ class _IsdpShellState extends State<IsdpShell> {
       _workflowView = _WorkflowView.reviewJob;
       _reviewingOrder = order;
       _assigningOrder = null;
-      _scanningOrder = null;
       _uploadingOrder = null;
       _supervisorOrder = null;
       _returnToReviewQueue = true;
@@ -1156,7 +1074,6 @@ class _IsdpShellState extends State<IsdpShell> {
     setState(() {
       _workflowView = _WorkflowView.assignTechnician;
       _assigningOrder = order;
-      _scanningOrder = null;
       _uploadingOrder = null;
       _reviewingOrder = null;
       _supervisorOrder = null;
@@ -1205,58 +1122,56 @@ class _IsdpShellState extends State<IsdpShell> {
     );
   }
 
-  Future<bool?> _scanArrival(WorkOrder order) {
-    _scanCompleter?.complete(null);
-    final completer = Completer<bool?>();
-    _rememberNavigation();
-    setState(() {
-      _scanCompleter = completer;
-      _workflowView = _WorkflowView.scanQr;
-      _scanningOrder = order;
-      _assigningOrder = null;
-      _uploadingOrder = null;
-      _reviewingOrder = null;
-      _supervisorOrder = null;
-      _returnToReviewQueue = false;
-      _tab = 0;
-    });
-    return completer.future;
-  }
-
-  void _completeScan(bool matched) {
-    final order = _scanningOrder;
-    if (matched && order != null) {
+  Future<void> _acceptTechnicianJob(WorkOrder order) async {
+    try {
+      final position = await _captureJobLocation();
+      if (!mounted) return;
+      final acceptedAt = DateTime.now();
       final onsite = order.copyWith(
         status: 'On Site',
         arrivalVerified: true,
-        arrivedAt: DateTime.now(),
+        arrivedAt: acceptedAt,
+        arrivalLatitude: position.latitude,
+        arrivalLongitude: position.longitude,
       );
-      _repository.markOnsite(order);
+      await _repository.markOnsite(
+        onsite,
+        latitude: position.latitude,
+        longitude: position.longitude,
+      );
       _replaceOrder(onsite);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Arrival confirmed. Upload the before photo when work starts.',
-          ),
-        ),
+        const SnackBar(content: Text('Job accepted. Arrival GPS and time recorded.')),
       );
+    } catch (error) {
+      if (mounted) _showLocationError(error);
     }
-
-    final completer = _scanCompleter;
-    if (completer != null && !completer.isCompleted) {
-      completer.complete(matched);
-    }
-    _scanCompleter = null;
-    _navigateBack();
   }
 
-  void _cancelScan() {
-    final completer = _scanCompleter;
-    if (completer != null && !completer.isCompleted) {
-      completer.complete(null);
+  Future<Position> _captureJobLocation() async {
+    if (!await Geolocator.isLocationServiceEnabled()) {
+      throw StateError('Enable location services to record this job action.');
     }
-    _scanCompleter = null;
-    _navigateBack();
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    if (permission == LocationPermission.denied) {
+      throw StateError('Location permission is required to record this job action.');
+    }
+    if (permission == LocationPermission.deniedForever) {
+      throw StateError('Enable location permission for ISDP in device settings.');
+    }
+    return Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+    );
+  }
+
+  void _showLocationError(Object error) {
+    final message = error is StateError
+        ? error.message
+        : 'Could not capture GPS coordinates. Please try again.';
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<List<String>?> _uploadEvidence(WorkOrder order, String? slot) {
@@ -1269,7 +1184,6 @@ class _IsdpShellState extends State<IsdpShell> {
       _uploadingOrder = order;
       _uploadingEvidenceSlot = slot;
       _assigningOrder = null;
-      _scanningOrder = null;
       _reviewingOrder = null;
       _supervisorOrder = null;
       _returnToReviewQueue = false;
@@ -1336,15 +1250,23 @@ class _IsdpShellState extends State<IsdpShell> {
       return;
     }
     final isResubmission = order.status == 'Declined';
-    final complete = order.copyWith(
-      status: 'Submitted',
-      sla: 'Ready for approval',
-      evidenceUploaded: true,
-      reviewed: false,
-      submittedAt: DateTime.now(),
-    );
-    unawaited(_repository.submitCompletion(complete));
-    _replaceOrder(complete);
+    try {
+      final position = await _captureJobLocation();
+      final complete = order.copyWith(
+        status: 'Submitted',
+        sla: 'Ready for approval',
+        evidenceUploaded: true,
+        reviewed: false,
+        submittedAt: DateTime.now(),
+        submissionLatitude: position.latitude,
+        submissionLongitude: position.longitude,
+      );
+      await _repository.submitCompletion(complete);
+      _replaceOrder(complete);
+    } catch (error) {
+      if (mounted) _showLocationError(error);
+      return;
+    }
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -1379,8 +1301,26 @@ class _IsdpShellState extends State<IsdpShell> {
       ),
     );
     if (confirmed != true) return;
-    await _repository.closeWorkOrder(order);
-    _replaceOrder(order.copyWith(status: 'Closed', isOpen: false));
+    try {
+      final position = await _captureJobLocation();
+      final closedAt = DateTime.now();
+      await _repository.closeWorkOrder(
+        order,
+        latitude: position.latitude,
+        longitude: position.longitude,
+      );
+      _replaceOrder(
+        order.copyWith(
+          status: 'Closed',
+          isOpen: false,
+          closedAt: closedAt,
+          closureLatitude: position.latitude,
+          closureLongitude: position.longitude,
+        ),
+      );
+    } catch (error) {
+      if (mounted) _showLocationError(error);
+    }
   }
 
   void _observeOrderNotifications(List<WorkOrder> orders) {
@@ -1683,7 +1623,6 @@ class _IsdpShellState extends State<IsdpShell> {
       _workflowView = _WorkflowView.completionDetails;
       _completionOrder = order;
       _assigningOrder = null;
-      _scanningOrder = null;
       _uploadingOrder = null;
       _reviewingOrder = null;
       _supervisorOrder = null;
@@ -1869,7 +1808,6 @@ class _NavigationSnapshot {
     required this.workflowView,
     required this.selectedOrderId,
     required this.assigningOrder,
-    required this.scanningOrder,
     required this.uploadingOrder,
     required this.uploadingEvidenceSlot,
     required this.completionOrder,
@@ -1883,7 +1821,6 @@ class _NavigationSnapshot {
   final _WorkflowView? workflowView;
   final String? selectedOrderId;
   final WorkOrder? assigningOrder;
-  final WorkOrder? scanningOrder;
   final WorkOrder? uploadingOrder;
   final String? uploadingEvidenceSlot;
   final WorkOrder? completionOrder;

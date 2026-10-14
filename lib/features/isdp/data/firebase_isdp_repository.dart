@@ -267,11 +267,13 @@ class FirebaseIsdpRepository implements IsdpRepository {
   }
 
   @override
-  Future<void> markOnsite(WorkOrder order) {
+  Future<void> markOnsite(WorkOrder order, {required double latitude, required double longitude}) {
     return _workOrders.doc(order.id).update({
       'status': 'On Site',
       'arrivalVerified': true,
       'arrivedAt': FieldValue.serverTimestamp(),
+      'arrivalLatitude': latitude,
+      'arrivalLongitude': longitude,
       'updatedAt': FieldValue.serverTimestamp(),
       'history': FieldValue.arrayUnion([_historyEntry('on site')]),
     });
@@ -322,6 +324,8 @@ class FirebaseIsdpRepository implements IsdpRepository {
       'customerName': order.customerName,
       'customerSignature': order.customerSignature,
       'submittedAt': FieldValue.serverTimestamp(),
+      'submissionLatitude': order.submissionLatitude,
+      'submissionLongitude': order.submissionLongitude,
       'reviewed': false,
       'reviewedAt': null,
       'declineReason': null,
@@ -372,11 +376,13 @@ class FirebaseIsdpRepository implements IsdpRepository {
   }
 
   @override
-  Future<void> closeWorkOrder(WorkOrder order) {
+  Future<void> closeWorkOrder(WorkOrder order, {required double latitude, required double longitude}) {
     return _workOrders.doc(order.id).update({
       'status': 'Closed',
       'isOpen': false,
       'closedAt': FieldValue.serverTimestamp(),
+      'closureLatitude': latitude,
+      'closureLongitude': longitude,
       'updatedAt': FieldValue.serverTimestamp(),
       'history': FieldValue.arrayUnion([
         _historyEntry('closed by technician after decline'),

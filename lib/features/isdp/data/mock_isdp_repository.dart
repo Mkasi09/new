@@ -33,7 +33,7 @@ class MockIsdpRepository implements IsdpRepository {
   Future<void> assignWorkOrder(WorkOrder order) async {}
 
   @override
-  Future<void> markOnsite(WorkOrder order) async {}
+  Future<void> markOnsite(WorkOrder order, {required double latitude, required double longitude}) async {}
 
   @override
   Future<void> saveEvidence(
@@ -62,7 +62,7 @@ class MockIsdpRepository implements IsdpRepository {
   }) async {}
 
   @override
-  Future<void> closeWorkOrder(WorkOrder order) async {}
+  Future<void> closeWorkOrder(WorkOrder order, {required double latitude, required double longitude}) async {}
 
   @override
   Future<void> deleteWorkOrder(WorkOrder order) async {}

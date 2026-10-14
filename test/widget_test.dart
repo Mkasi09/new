@@ -103,7 +103,7 @@ void main() {
     expect(find.text('Today'), findsWidgets);
     expect(find.text('Next Steps'), findsOneWidget);
     expect(find.textContaining('Time left'), findsOneWidget);
-    expect(find.text('Confirm arrival'), findsOneWidget);
+    expect(find.text('Accept Job'), findsOneWidget);
     expect(find.text('Upload before photo'), findsOneWidget);
     expect(find.textContaining('Matsapha Office Block'), findsWidgets);
   });
@@ -205,7 +205,7 @@ void main() {
     );
   });
 
-  testWidgets('technician countdown runs before arrival scan', (tester) async {
+  testWidgets('technician countdown runs before job acceptance', (tester) async {
     await tester.pumpWidget(
       IsdpApp(home: IsdpShell(isdpRepository: _UnscannedJobRepository())),
     );
@@ -565,7 +565,7 @@ mixin _RepositoryTestStubs {
     required bool allowResubmission,
   }) async {}
 
-  Future<void> closeWorkOrder(WorkOrder order) async {}
+  Future<void> closeWorkOrder(WorkOrder order, {required double latitude, required double longitude}) async {}
 
   Stream<List<SupportMessage>> watchSupportMessages({int limit = 50}) =>
       Stream.value(const []);
@@ -689,7 +689,7 @@ class _TestIsdpRepository with _RepositoryTestStubs implements IsdpRepository {
   Future<void> assignWorkOrder(WorkOrder order) async {}
 
   @override
-  Future<void> markOnsite(WorkOrder order) async {}
+  Future<void> markOnsite(WorkOrder order, {required double latitude, required double longitude}) async {}
 
   @override
   Future<void> saveEvidence(
@@ -799,7 +799,7 @@ class _EmptyIsdpRepository with _RepositoryTestStubs implements IsdpRepository {
   Future<void> assignWorkOrder(WorkOrder order) async {}
 
   @override
-  Future<void> markOnsite(WorkOrder order) async {}
+  Future<void> markOnsite(WorkOrder order, {required double latitude, required double longitude}) async {}
 
   @override
   Future<void> saveEvidence(
@@ -996,7 +996,7 @@ class _CompletableIsdpRepository
   Future<void> assignWorkOrder(WorkOrder order) async {}
 
   @override
-  Future<void> markOnsite(WorkOrder order) async {}
+  Future<void> markOnsite(WorkOrder order, {required double latitude, required double longitude}) async {}
 
   @override
   Future<void> saveEvidence(

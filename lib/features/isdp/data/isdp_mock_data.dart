@@ -17,9 +17,9 @@ const jobSteps = [
     'Check the customer request, location, contact person, and expected outcome.',
   ),
   JobStep(
-    'Confirm arrival',
-    Icons.qr_code_scanner,
-    'Confirm that the technician has arrived at the correct site.',
+    'Accept job',
+    Icons.location_on_outlined,
+    'Record the technician location and acceptance time.',
   ),
   JobStep(
     'Complete safety check',
