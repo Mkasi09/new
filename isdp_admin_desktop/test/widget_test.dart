@@ -183,7 +183,7 @@ class FakeAdminRepository implements AdminRepository {
 }
 
 void main() {
-  test('QR payload contains only the site code', () {
+  test('work order retains its site code', () {
     const order = WorkOrder(
       id: 'JOB-CMT-ESW-100',
       site: 'Mbabane Central',
@@ -195,7 +195,7 @@ void main() {
       priority: Priority.high,
     );
 
-    expect(order.qrPayload, 'SITE-100');
+    expect(order.siteCode, 'SITE-100');
   });
 
   test('work order reads evidence photos from Firestore', () {

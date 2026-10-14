@@ -2,13 +2,17 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:qr_flutter/qr_flutter.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 const _firebaseApiKey = 'AIzaSyCqnP-_LOkeUpxvOKG8llnLCuX9mpJc2PI';
 const _firebaseProjectId = 'magzmotron-5ae93';
@@ -383,7 +387,6 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
                 order: _selectedOrder!,
                 onAction: _performAction,
                 onAssign: () => _openAssign(_selectedOrder!),
-                onShowQr: () => _showQrDialog(_selectedOrder!),
                 onDelete: () => _confirmDeleteOrder(_selectedOrder!),
               ),
       AdminSection.jobChats =>
@@ -714,13 +717,6 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
     );
   }
 
-  Future<void> _showQrDialog(WorkOrder order) {
-    return showDialog<void>(
-      context: context,
-      builder: (context) => JobQrDialog(order: order),
-    );
-  }
-
   Future<void> _confirmDeleteOrder(WorkOrder order) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -843,31 +839,22 @@ class _AdminDesktopShellState extends State<AdminDesktopShell> {
           success: '${order.id} dispatched.',
         );
       case OrderAction.markOnsite:
-        await _runMutation(
-          () => widget.repository.updateWorkOrder(
-            widget.session,
-            order.copyWith(
-              status: 'On Site',
-              arrivedAt: DateTime.now(),
-              arrivalVerified: true,
-            ),
-            action: 'arrival verified',
-          ),
-          success: '${order.id} marked on site.',
+        await _captureLocationAndUpdate(
+          context,
+          widget.repository,
+          widget.session,
+          order,
+          accepted: true,
+          runMutation: _runMutation,
         );
       case OrderAction.markSubmitted:
-        await _runMutation(
-          () => widget.repository.updateWorkOrder(
-            widget.session,
-            order.copyWith(
-              status: 'Submitted',
-              sla: 'Ready for approval',
-              submittedAt: DateTime.now(),
-              evidenceUploaded: true,
-            ),
-            action: 'submitted for review',
-          ),
-          success: '${order.id} submitted.',
+        await _captureLocationAndUpdate(
+          context,
+          widget.repository,
+          widget.session,
+          order,
+          accepted: false,
+          runMutation: _runMutation,
         );
       case OrderAction.review:
         await _runMutation(
@@ -1752,14 +1739,12 @@ class OrderDetailView extends StatelessWidget {
     required this.order,
     required this.onAction,
     required this.onAssign,
-    required this.onShowQr,
     required this.onDelete,
   });
 
   final WorkOrder order;
   final void Function(WorkOrder order, OrderAction action) onAction;
   final VoidCallback onAssign;
-  final VoidCallback onShowQr;
   final VoidCallback onDelete;
 
   @override
@@ -1800,7 +1785,6 @@ class OrderDetailView extends StatelessWidget {
               _InfoTile('Address', order.address, Icons.map_outlined),
               _InfoTile('Scope', order.scope, Icons.build_outlined),
               _InfoTile('SLA', order.sla, Icons.schedule_outlined),
-              _InfoTile('Site code', order.siteCode, Icons.qr_code_2),
               _InfoTile('Priority', order.priority.label, Icons.flag_outlined),
               _InfoTile(
                 'Supervisor',
@@ -1818,14 +1802,261 @@ class OrderDetailView extends StatelessWidget {
         const SizedBox(height: 16),
         _WorkDurationPanel(order: order),
         const SizedBox(height: 16),
-        _CompletionReportPanel(order: order),
+        _JobLocationPanel(order: order),
         const SizedBox(height: 16),
-        _QrPreviewCard(order: order, onShowQr: onShowQr),
+        _CompletionReportPanel(order: order),
         const SizedBox(height: 16),
         _JobActionBar(order: order, onAction: onAction, onAssign: onAssign),
         const SizedBox(height: 16),
         _EvidenceGallery(order: order),
       ],
+    );
+  }
+}
+
+class _JobLocationPanel extends StatelessWidget {
+  const _JobLocationPanel({required this.order});
+  final WorkOrder order;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasSubmissionLocation =
+        order.submissionLatitude != null && order.submissionLongitude != null;
+    final points = hasSubmissionLocation
+        ? [
+            _JobMapPoint(
+              label: 'Submitted for approval',
+              point: LatLng(
+                order.submissionLatitude!,
+                order.submissionLongitude!,
+              ),
+              color: AppColors.success,
+            ),
+          ]
+        : <_JobMapPoint>[];
+    final center = hasSubmissionLocation
+        ? points.first.point
+        : const LatLng(-26.3054, 31.1367);
+
+    return _Panel(
+      title: 'Job Location History',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (points.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 12),
+              child: Text(
+                'No submission coordinates have been recorded for this job yet.',
+                style: TextStyle(color: AppColors.muted),
+              ),
+            )
+          else
+            SizedBox(
+              height: 320,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: FlutterMap(
+                  options: MapOptions(initialCenter: center, initialZoom: 14),
+                  children: [
+                    TileLayer(
+                      urlTemplate:
+                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      userAgentPackageName: 'com.phephamv.isdp_admin_desktop',
+                    ),
+                    MarkerLayer(
+                      markers: [
+                        for (final item in points)
+                          Marker(
+                            point: item.point,
+                            width: 46,
+                            height: 52,
+                            child: Tooltip(
+                              message: item.label,
+                              child: Icon(
+                                Icons.location_on,
+                                size: 42,
+                                color: item.color,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    RichAttributionWidget(
+                      attributions: [
+                        TextSourceAttribution(
+                          '© OpenStreetMap contributors',
+                          onTap: () => launchUrl(
+                            Uri.parse(
+                              'https://www.openstreetmap.org/copyright',
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          if (points.isNotEmpty) const SizedBox(height: 12),
+          _LocationEvent(
+            label: 'Submitted for approval',
+            timestamp: order.submittedAt,
+            latitude: order.submissionLatitude,
+            longitude: order.submissionLongitude,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _JobMapPoint {
+  const _JobMapPoint({
+    required this.label,
+    required this.point,
+    required this.color,
+  });
+  final String label;
+  final LatLng point;
+  final Color color;
+}
+
+class _LocationEvent extends StatelessWidget {
+  const _LocationEvent({
+    required this.label,
+    required this.timestamp,
+    required this.latitude,
+    required this.longitude,
+  });
+  final String label;
+  final DateTime? timestamp;
+  final double? latitude;
+  final double? longitude;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasCoordinates = latitude != null && longitude != null;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          const Icon(Icons.location_on_outlined, color: AppColors.primary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  timestamp == null
+                      ? 'Not recorded'
+                      : _dateTimeLabel(timestamp!),
+                  style: const TextStyle(color: AppColors.muted),
+                ),
+                if (hasCoordinates)
+                  Text(
+                    '${latitude!.toStringAsFixed(6)}, ${longitude!.toStringAsFixed(6)}',
+                    style: const TextStyle(
+                      color: AppColors.muted,
+                      fontSize: 12,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (hasCoordinates)
+            IconButton(
+              tooltip: 'Open in Google Maps',
+              onPressed: () => _openLocationInMaps(latitude!, longitude!),
+              icon: const Icon(Icons.map_outlined),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+Future<void> _openLocationInMaps(double latitude, double longitude) async {
+  final uri = Uri.https('www.google.com', '/maps/search/', {
+    'api': '1',
+    'query': '$latitude,$longitude',
+  });
+  await launchUrl(uri, mode: LaunchMode.platformDefault);
+}
+
+Future<void> _captureLocationAndUpdate(
+  BuildContext context,
+  AdminRepository repository,
+  AuthSession session,
+  WorkOrder order, {
+  required bool accepted,
+  required Future<void> Function(
+    Future<void> Function() mutation, {
+    required String? success,
+  })
+  runMutation,
+}) async {
+  try {
+    if (!await Geolocator.isLocationServiceEnabled()) {
+      throw StateError('Enable location services to record this job event.');
+    }
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      throw StateError(
+        'Location permission is needed to record GPS coordinates.',
+      );
+    }
+    final position = await Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+    );
+    final now = DateTime.now();
+    final updated = accepted
+        ? order.copyWith(
+            status: 'On Site',
+            arrivedAt: now,
+            arrivalVerified: true,
+            arrivalLatitude: position.latitude,
+            arrivalLongitude: position.longitude,
+          )
+        : order.copyWith(
+            status: 'Submitted',
+            sla: 'Ready for approval',
+            submittedAt: now,
+            submissionLatitude: position.latitude,
+            submissionLongitude: position.longitude,
+            evidenceUploaded: true,
+          );
+    await runMutation(
+      () => repository.updateWorkOrder(
+        session,
+        updated,
+        action: accepted
+            ? 'technician accepted job with GPS'
+            : 'submitted for review with GPS',
+      ),
+      success: accepted
+          ? '${order.id} accepted and GPS recorded.'
+          : '${order.id} submitted with GPS recorded.',
+    );
+  } catch (error) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          error is StateError
+              ? error.message
+              : 'Could not capture GPS coordinates. Please try again.',
+        ),
+      ),
     );
   }
 }
@@ -1881,7 +2112,7 @@ class _WorkDurationPanel extends StatelessWidget {
                 const SizedBox(height: 5),
                 Text(
                   arrivedAt == null
-                      ? 'Time starts when the technician scans the site QR code.'
+                      ? 'Time starts when the technician accepts the job.'
                       : submittedAt == null
                       ? 'Started ${_dateTimeLabel(arrivedAt)}. Time is still being counted.'
                       : 'From ${_dateTimeLabel(arrivedAt)} to ${_dateTimeLabel(submittedAt)}.',
@@ -2039,7 +2270,7 @@ class _AdminSignaturePainter extends CustomPainter {
       ..style = PaintingStyle.stroke;
     for (final stroke in strokes) {
       if (stroke.isEmpty) continue;
-      final path = Path()
+      final path = ui.Path()
         ..moveTo(stroke.first.dx * size.width, stroke.first.dy * size.height);
       for (final point in stroke.skip(1)) {
         path.lineTo(point.dx * size.width, point.dy * size.height);
@@ -2487,348 +2718,6 @@ Uint8List? _decodeEvidencePhoto(String? photoData) {
   }
 }
 
-class JobQrDialog extends StatefulWidget {
-  const JobQrDialog({super.key, required this.order});
-
-  final WorkOrder order;
-
-  @override
-  State<JobQrDialog> createState() => _JobQrDialogState();
-}
-
-class _JobQrDialogState extends State<JobQrDialog> {
-  bool _busy = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final payload = widget.order.qrPayload;
-    return AlertDialog(
-      titlePadding: const EdgeInsets.fromLTRB(24, 22, 16, 0),
-      title: Row(
-        children: [
-          const Expanded(child: Text('Site QR Code')),
-          IconButton(
-            tooltip: 'Close',
-            onPressed: () => Navigator.pop(context),
-            icon: const Icon(Icons.close),
-          ),
-        ],
-      ),
-      content: SizedBox(
-        width: 680,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 280,
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  QrImageView(
-                    data: payload,
-                    size: 238,
-                    backgroundColor: Colors.white,
-                    errorCorrectionLevel: QrErrorCorrectLevel.M,
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    widget.order.siteCode,
-                    style: const TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 22),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    widget.order.site,
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    widget.order.address,
-                    style: const TextStyle(color: AppColors.muted),
-                  ),
-                  const SizedBox(height: 18),
-                  _QrDetail(label: 'Work order', value: widget.order.id),
-                  _QrDetail(label: 'Site code', value: widget.order.siteCode),
-                  _QrDetail(label: 'Status', value: widget.order.status),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'The technician scans this code to identify the job and confirm the correct site.',
-                    style: TextStyle(color: AppColors.muted),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        OutlinedButton.icon(
-          onPressed: _busy ? null : _copy,
-          icon: const Icon(Icons.copy_outlined),
-          label: const Text('Copy details'),
-        ),
-        OutlinedButton.icon(
-          onPressed: _busy ? null : _export,
-          icon: const Icon(Icons.picture_as_pdf_outlined),
-          label: const Text('Save PDF'),
-        ),
-        FilledButton.icon(
-          onPressed: _busy ? null : _send,
-          icon: const Icon(Icons.send_outlined),
-          label: Text(_busy ? 'Preparing' : 'Send'),
-        ),
-      ],
-    );
-  }
-
-  Future<void> _copy() async {
-    await Clipboard.setData(
-      ClipboardData(
-        text:
-            '${widget.order.id}\n${widget.order.site}\n${widget.order.siteCode}\n${widget.order.qrPayload}',
-      ),
-    );
-    if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('QR job details copied.')));
-  }
-
-  Future<void> _export() async {
-    setState(() => _busy = true);
-    try {
-      final file = await _saveQrPdfAs(widget.order);
-      if (file == null) return;
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('QR PDF saved to ${file.path}')));
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(_friendlyError(error))));
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _send() async {
-    final recipient = await showDialog<String>(
-      context: context,
-      builder: (context) => const _SendQrDialog(),
-    );
-    if (recipient == null) return;
-    setState(() => _busy = true);
-    try {
-      final file = await _writeQrPdfAttachment(widget.order);
-      final subject = 'Site QR - ${widget.order.id}';
-      final body =
-          'Hello,\n\nPlease find the site QR details below.\n\n'
-          'Work order: ${widget.order.id}\n'
-          'Site: ${widget.order.site}\n'
-          'Address: ${widget.order.address}\n'
-          'Site code: ${widget.order.siteCode}\n\n'
-          'The site QR PDF is attached.';
-      await _openOutlookDraftWithAttachment(
-        recipient: recipient,
-        subject: subject,
-        body: body,
-        attachmentPath: file.path,
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Email opened with the QR PDF attached.')),
-      );
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(_friendlyError(error))));
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-}
-
-class _SendQrDialog extends StatefulWidget {
-  const _SendQrDialog();
-
-  @override
-  State<_SendQrDialog> createState() => _SendQrDialogState();
-}
-
-class _SendQrDialogState extends State<_SendQrDialog> {
-  final _controller = TextEditingController();
-  String? _error;
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Send QR by email'),
-      content: SizedBox(
-        width: 420,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              controller: _controller,
-              autofocus: true,
-              keyboardType: TextInputType.emailAddress,
-              decoration: InputDecoration(
-                labelText: 'Recipient email',
-                prefixIcon: const Icon(Icons.email_outlined),
-                errorText: _error,
-              ),
-              onSubmitted: (_) => _submit(),
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'This opens an Outlook draft with the generated QR PDF already attached.',
-              style: TextStyle(color: AppColors.muted),
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        FilledButton.icon(
-          onPressed: _submit,
-          icon: const Icon(Icons.send_outlined),
-          label: const Text('Continue'),
-        ),
-      ],
-    );
-  }
-
-  void _submit() {
-    final value = _controller.text.trim();
-    if (value.isEmpty || !value.contains('@')) {
-      setState(() => _error = 'Enter a valid email address.');
-      return;
-    }
-    Navigator.pop(context, value);
-  }
-}
-
-class _QrPreviewCard extends StatelessWidget {
-  const _QrPreviewCard({required this.order, required this.onShowQr});
-
-  final WorkOrder order;
-  final VoidCallback onShowQr;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 118,
-            height: 118,
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: QrImageView(data: order.qrPayload),
-          ),
-          const SizedBox(width: 20),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Site QR Code',
-                  style: TextStyle(
-                    color: AppColors.ink,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '${order.siteCode} - ready to view, save, or send.',
-                  style: const TextStyle(color: AppColors.muted),
-                ),
-                const SizedBox(height: 14),
-                FilledButton.icon(
-                  onPressed: onShowQr,
-                  icon: const Icon(Icons.qr_code_2),
-                  label: const Text('Open QR'),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _QrDetail extends StatelessWidget {
-  const _QrDetail({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 88,
-            child: Text(label, style: const TextStyle(color: AppColors.muted)),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(fontWeight: FontWeight.w800),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class TeamsView extends StatelessWidget {
   const TeamsView({
     super.key,
@@ -3127,9 +3016,9 @@ class AcceptanceView extends StatelessWidget {
           runSpacing: 12,
           children: [
             _GateCard(
-              title: 'Site QR verified',
+              title: 'Technician job acceptance',
               detail:
-                  '${orders.where((job) => job.arrivalVerified).length} jobs verified',
+                  '${orders.where((job) => job.arrivalVerified).length} jobs accepted with location',
               complete: orders.any((job) => job.arrivalVerified),
             ),
             _GateCard(
@@ -4799,7 +4688,11 @@ class WorkOrder {
     required this.priority,
     this.dueAt,
     this.arrivedAt,
+    this.arrivalLatitude,
+    this.arrivalLongitude,
     this.submittedAt,
+    this.submissionLatitude,
+    this.submissionLongitude,
     this.arrivalVerified = false,
     this.evidenceUploaded = false,
     this.evidenceSlots = const [],
@@ -4830,7 +4723,11 @@ class WorkOrder {
   final Priority priority;
   final DateTime? dueAt;
   final DateTime? arrivedAt;
+  final double? arrivalLatitude;
+  final double? arrivalLongitude;
   final DateTime? submittedAt;
+  final double? submissionLatitude;
+  final double? submissionLongitude;
   final bool arrivalVerified;
   final bool evidenceUploaded;
   final List<String> evidenceSlots;
@@ -4859,13 +4756,15 @@ class WorkOrder {
 
   bool get isOpenDueSoon => status != 'Approved' && isDueSoon;
 
-  String get qrPayload => siteCode;
-
   WorkOrder copyWith({
     String? status,
     String? sla,
     DateTime? arrivedAt,
+    double? arrivalLatitude,
+    double? arrivalLongitude,
     DateTime? submittedAt,
+    double? submissionLatitude,
+    double? submissionLongitude,
     bool? arrivalVerified,
     bool? evidenceUploaded,
     bool? reviewed,
@@ -4889,7 +4788,11 @@ class WorkOrder {
       priority: priority,
       dueAt: dueAt,
       arrivedAt: arrivedAt ?? this.arrivedAt,
+      arrivalLatitude: arrivalLatitude ?? this.arrivalLatitude,
+      arrivalLongitude: arrivalLongitude ?? this.arrivalLongitude,
       submittedAt: submittedAt ?? this.submittedAt,
+      submissionLatitude: submissionLatitude ?? this.submissionLatitude,
+      submissionLongitude: submissionLongitude ?? this.submissionLongitude,
       arrivalVerified: arrivalVerified ?? this.arrivalVerified,
       evidenceUploaded: evidenceUploaded ?? this.evidenceUploaded,
       evidenceSlots: evidenceSlots,
@@ -4945,7 +4848,11 @@ class WorkOrder {
       priority: Priority.fromString(_fieldString(fields['priority'])),
       dueAt: _fieldDate(fields['dueAt']),
       arrivedAt: _fieldDate(fields['arrivedAt']),
+      arrivalLatitude: _fieldDouble(fields['arrivalLatitude']),
+      arrivalLongitude: _fieldDouble(fields['arrivalLongitude']),
       submittedAt: _fieldDate(fields['submittedAt']),
+      submissionLatitude: _fieldDouble(fields['submissionLatitude']),
+      submissionLongitude: _fieldDouble(fields['submissionLongitude']),
       arrivalVerified: _fieldBool(fields['arrivalVerified']) ?? false,
       evidenceUploaded: _fieldBool(fields['evidenceUploaded']) ?? false,
       evidenceSlots: _fieldStringList(fields['evidenceSlots']),
@@ -5002,9 +4909,17 @@ class WorkOrder {
       }
     }
 
+    void addNumber(String key, double? value) {
+      if (value != null) fields[key] = _doubleField(value);
+    }
+
     addDate('dueAt', dueAt);
     addDate('arrivedAt', arrivedAt);
+    addNumber('arrivalLatitude', arrivalLatitude);
+    addNumber('arrivalLongitude', arrivalLongitude);
     addDate('submittedAt', submittedAt);
+    addNumber('submissionLatitude', submissionLatitude);
+    addNumber('submissionLongitude', submissionLongitude);
     addDate('reviewedAt', reviewedAt);
     addDate('createdAt', createdAt);
     addDate('updatedAt', updatedAt);
@@ -7354,17 +7269,6 @@ String _invoiceQuantity(double value) {
       : value.toStringAsFixed(2);
 }
 
-Future<File?> _saveQrPdfAs(WorkOrder order) async {
-  final path = await _pickPdfSavePath(
-    '${_safeQrFileId(order)}_site_qr.pdf',
-    title: 'Save site QR PDF',
-  );
-  if (path == null) return null;
-  final file = File(path);
-  await file.writeAsBytes(await _buildQrPdfBytes(order), flush: true);
-  return file;
-}
-
 Future<String?> _pickPdfSavePath(
   String suggestedName, {
   required String title,
@@ -7403,86 +7307,6 @@ if (\$dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
   final path = result.stdout.toString().trim();
   if (path.isEmpty) return null;
   return path.toLowerCase().endsWith('.pdf') ? path : '$path.pdf';
-}
-
-Future<File> _writeQrPdfAttachment(WorkOrder order) async {
-  final temp = Directory.systemTemp;
-  final file = File(
-    '${temp.path}${Platform.pathSeparator}${_safeQrFileId(order)}_site_qr.pdf',
-  );
-  await file.writeAsBytes(await _buildQrPdfBytes(order), flush: true);
-  return file;
-}
-
-String _safeQrFileId(WorkOrder order) {
-  return order.id.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
-}
-
-Future<List<int>> _buildQrPdfBytes(WorkOrder order) async {
-  final logoBytes = (await rootBundle.load(
-    'assets/logo1.png',
-  )).buffer.asUint8List();
-  final logo = pw.MemoryImage(logoBytes);
-  final document = pw.Document();
-  document.addPage(
-    pw.Page(
-      margin: const pw.EdgeInsets.all(42),
-      build: (context) => pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: [
-          pw.Row(
-            crossAxisAlignment: pw.CrossAxisAlignment.center,
-            children: [
-              pw.Image(logo, width: 76, height: 54, fit: pw.BoxFit.contain),
-              pw.SizedBox(width: 16),
-              pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.Text(
-                    'PHEPHA MV ISDP',
-                    style: pw.TextStyle(
-                      fontSize: 24,
-                      fontWeight: pw.FontWeight.bold,
-                    ),
-                  ),
-                  pw.Text('Site identification QR'),
-                ],
-              ),
-            ],
-          ),
-          pw.Divider(),
-          pw.SizedBox(height: 12),
-          pw.Text('Work order: ${order.id}'),
-          pw.Text('Site: ${order.site}'),
-          pw.Text('Address: ${order.address}'),
-          pw.Text('Site code: ${order.siteCode}'),
-          pw.SizedBox(height: 28),
-          pw.Center(
-            child: pw.BarcodeWidget(
-              barcode: pw.Barcode.qrCode(),
-              data: order.qrPayload,
-              width: 280,
-              height: 280,
-            ),
-          ),
-          pw.SizedBox(height: 20),
-          pw.Center(
-            child: pw.Text(
-              order.siteCode,
-              style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold),
-            ),
-          ),
-          pw.Spacer(),
-          pw.Text(
-            'Scan this QR at the site to identify the work order and verify the location.',
-            style: const pw.TextStyle(fontSize: 10),
-          ),
-        ],
-      ),
-    ),
-  );
-
-  return document.save();
 }
 
 Future<void> _openOutlookDraftWithAttachment({
